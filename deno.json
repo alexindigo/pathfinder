@@ -1,0 +1,24 @@
+{
+  "name": "@pathfinder/pathfinder",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "tasks": {
+    "test": "deno test --allow-read --allow-net tests/",
+    "check": "deno check mod.ts src/ tests/",
+    "dashboard": "deno run --allow-read --allow-write bench/generate_dashboard.ts"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.16"
+  },
+  "lint": {
+    "include": ["src/", "tests/", "mod.ts"]
+  },
+  "fmt": {
+    "include": ["src/", "tests/", "mod.ts", "bench/"]
+  },
+  "test": {
+    "include": ["tests/"]
+  }
+}

@@ -1,0 +1,10 @@
+# Local secrets / direnv
+.envrc
+token
+*.local.toml
+
+# Deno
+coverage/
+
+# OS
+.DS_Store

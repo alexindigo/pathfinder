@@ -8,4 +8,21 @@
  * `<method>.ts` file = handler.
  */
 
-export {};
+export {
+  type Chunk,
+  type DynamicChunk,
+  parsePattern,
+  routeShapeKey,
+  type StaticChunk,
+  typeRegistry,
+  type TypeSpec,
+} from "./src/grammar.ts";
+
+export {
+  CompiledMatcher,
+  type Handler,
+  type Matcher,
+  type Params,
+  type ParamValue,
+  type Route,
+} from "./src/matcher.ts";

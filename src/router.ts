@@ -7,6 +7,7 @@
 
 import { coerceResult, ContractViolation, HttpError } from "./http.ts";
 import { BodyLimitError, limitTransform } from "./body_limit.ts";
+import type { ManifestRow } from "./loader.ts";
 import type { LookupResult, Params } from "./matcher.ts";
 import { CompiledMatcher } from "./matcher.ts";
 import type { TypeSpec } from "./grammar.ts";
@@ -79,6 +80,8 @@ export interface Context {
   /** The matched route's metadata (module named exports); frozen per route.
    * Empty on misses. */
   readonly meta: Meta;
+  /** Effective file table of THIS router instance — read-only. */
+  _manifest(): readonly ManifestRow[];
   /** Miss data — present only inside 404/405/204 outcome rendering. */
   miss?: Miss;
   /** The thrown value — present only inside 500 outcome rendering. */
@@ -490,7 +493,11 @@ function buildRequestView(
   return view;
 }
 
-function buildContext(app: object, meta: Meta): Context {
+function buildContext(
+  app: object,
+  meta: Meta,
+  manifest: () => readonly ManifestRow[],
+): Context {
   const state: State = {};
   const context = Object.create(null) as Context;
   Object.defineProperties(context, {
@@ -499,6 +506,7 @@ function buildContext(app: object, meta: Meta): Context {
     app: { get: () => app, enumerable: true },
     state: { get: () => state, enumerable: true },
     meta: { get: () => meta, enumerable: true },
+    _manifest: { value: manifest, enumerable: true },
     miss: { value: undefined, writable: true, enumerable: true },
     error: { value: undefined, writable: true, enumerable: true },
   });
@@ -539,9 +547,17 @@ export class Router {
   // outcome code → dir → renderer
   #outcomes = new Map<number, Map<string, Handler>>();
   #app: object;
+  #manifest: () => readonly ManifestRow[];
 
-  constructor(app: object = {}, opts?: { types?: Record<string, TypeSpec> }) {
+  constructor(
+    app: object = {},
+    opts?: {
+      types?: Record<string, TypeSpec>;
+      manifest?: () => readonly ManifestRow[];
+    },
+  ) {
     this.#app = app;
+    this.#manifest = opts?.manifest ?? (() => []);
     this.#matcher = new CompiledMatcher([], { types: opts?.types });
   }
 
@@ -660,7 +676,11 @@ export class Router {
       const limit = (entry.meta as { bodyLimit?: unknown }).bodyLimit;
       if (typeof limit === "number") body.setLimit(limit);
       const view = buildRequestView(request, path, result.params, body, info);
-      const context = buildContext(this.#app, Object.freeze(entry.meta));
+      const context = buildContext(
+        this.#app,
+        Object.freeze(entry.meta),
+        this.#manifest,
+      );
       return await this.#dispatch(
         view,
         context,
@@ -672,7 +692,7 @@ export class Router {
     }
 
     const view = buildRequestView(request, path, {}, body, info);
-    const context = buildContext(this.#app, Object.freeze({}));
+    const context = buildContext(this.#app, Object.freeze({}), this.#manifest);
 
     if (result.kind === "method-miss") {
       const entry = result.data as RouteEntry | undefined;

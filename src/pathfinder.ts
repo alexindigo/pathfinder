@@ -64,6 +64,7 @@ export async function pathfinder(
   let manifestRows: ManifestRow[] = [];
   const loaded: Loaded = await resolveTree({
     layer0: layer0Entries(() => manifestRows),
+    manifest: () => manifestRows,
     appRoots: opts.roots ?? [],
     envRoots: envRoots(),
     app: opts.app,

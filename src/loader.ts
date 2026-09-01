@@ -416,6 +416,8 @@ export interface ResolveOptions {
   app?: object;
   /** Custom type registry, immutable after boot. */
   types?: Record<string, TypeSpec>;
+  /** Read-only manifest accessor, exposed to handlers as context._manifest(). */
+  manifest?: () => readonly ManifestRow[];
 }
 
 export interface Loaded {
@@ -464,7 +466,10 @@ export async function resolveTree(opts: ResolveOptions): Promise<Loaded> {
     layerNum++;
   }
 
-  const router = new Router(opts.app ?? {}, { types: opts.types });
+  const router = new Router(opts.app ?? {}, {
+    types: opts.types,
+    manifest: opts.manifest,
+  });
   for (const [dir, mws] of middlewareByDir(resolver.middleware)) {
     router.setDirMiddleware(dir, mws);
   }

@@ -333,6 +333,24 @@ Deno.test("context: meta frozen per route; empty on misses", async () => {
   assertEquals((await miss.json() as { metaKeys: number }).metaKeys, 0);
 });
 
+Deno.test("context: _manifest() accessor available to handlers", async () => {
+  const rows = [{
+    kind: "route" as const,
+    layer: 1,
+    root: "/x",
+    file: "/x/get.ts",
+    method: "GET",
+    pattern: "/x",
+  }];
+  const router = new Router({}, { manifest: () => rows });
+  router.add("GET", "/", (_request, context) => ({
+    count: context._manifest().length,
+    first: context._manifest()[0].file,
+  }));
+  const res = await dispatch(router, GET("/"));
+  assertEquals(await res.json(), { count: 1, first: "/x/get.ts" });
+});
+
 // --- Request view (§2.2 + §11) ------------------------------------------------
 
 Deno.test("request view: params coerced, path, lazy query, headers reference", async () => {

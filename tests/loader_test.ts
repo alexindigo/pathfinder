@@ -222,6 +222,39 @@ Deno.test("factory: pathfinder() returns the callable app with properties", asyn
   });
 });
 
+Deno.test("factory: Layer 0 rows carry real file identities (Amendment 1)", async () => {
+  await quiet(async () => {
+    const app = await pathfinder({ roots: [APP] });
+
+    // End-of-chain proof: a loopback request to /_status SERVES the manifest,
+    // and the served rows name the real packaged files.
+    const loopback = { transport: "tcp", hostname: "127.0.0.1", port: 1 };
+    const served = await dispatch(app, "/_status", {}, {
+      remoteAddr: loopback,
+    });
+    assertEquals(served.status, 200);
+    const manifest = await served.json() as ManifestRow[];
+    const status404Row = manifest.find((r) =>
+      r.kind === "status" && r.code === 404
+    );
+    assert(status404Row !== undefined, "404 status row in served manifest");
+    assert(status404Row.file.endsWith("src/layer0/404.ts"), status404Row.file);
+    assertEquals(status404Row.layer, 0);
+    const statusGetRow = manifest.find((r) =>
+      r.kind === "route" && r.method === "GET" && r.pattern === "/_status"
+    );
+    assert(statusGetRow !== undefined, "GET /_status route row");
+    assert(
+      statusGetRow.file.endsWith("src/layer0/_status/get.ts"),
+      statusGetRow.file,
+    );
+    assertEquals(statusGetRow.layer, 0);
+
+    // app.manifest() agrees with what the file served.
+    assert(app.manifest().some((r) => r.file.endsWith("src/layer0/404.ts")));
+  });
+});
+
 Deno.test("factory: Layer 0 — 404 JSON, 405 Allow, 204 OPTIONS reflection", async () => {
   await quiet(async () => {
     const app = await pathfinder({ roots: [APP] });

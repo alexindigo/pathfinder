@@ -405,9 +405,10 @@ function dirPatternOf(dirRel: string): string {
 // --- Assembly -------------------------------------------------------------------
 
 export interface ResolveOptions {
-  /** Layer 0 (the package's own root) — pre-seeded so app roots shadow or
-   * tombstone its defaults. */
-  layer0?: Entry[];
+  /** Layer 0 — the package's own root, walked like any other (Amendment 1:
+   * real files, no synthetic entries). App roots and overlays shadow or
+   * tombstone its files identically (last wins, per file). */
+  layer0Root?: string | URL;
   /** Layer 1 app roots — missing root is an error. */
   appRoots: (string | URL)[];
   /** Layer 2+ overlay roots — missing root is warn+skip. */
@@ -430,7 +431,11 @@ export async function resolveTree(opts: ResolveOptions): Promise<Loaded> {
   const resolver = new Resolver();
   resolver.registry = opts.types;
 
-  for (const entry of opts.layer0 ?? []) resolver.add(entry);
+  if (opts.layer0Root !== undefined) {
+    // The package's own tree — a missing layer0Root is a broken install,
+    // not a warn+skip case. Let it throw.
+    for (const entry of await walkRoot(opts.layer0Root, 0)) resolver.add(entry);
+  }
 
   for (const root of opts.appRoots) {
     let entries: Entry[];

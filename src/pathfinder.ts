@@ -11,7 +11,6 @@
 
 import { resolveTree } from "./loader.ts";
 import type { Loaded, ManifestRow } from "./loader.ts";
-import { layer0Entries } from "./layer0.ts";
 import type { LookupResult } from "./matcher.ts";
 import type { TypeSpec } from "./grammar.ts";
 
@@ -58,12 +57,28 @@ export async function pathfinder(
     ? { roots: [options] }
     : options;
 
-  // Late-bound: Layer 0 registers before resolution, but the manifest is only
-  // READ at request time — by then the snapshot below exists (post-boot
-  // static: v1 makes no post-boot mutability promise).
+  // Layer 0 is a real directory shipped in the package, discovered by the
+  // same walk as every other root (Amendment 1 — no hardcoded file index).
+  // A filesystem framework expects a filesystem: if the package resolves
+  // over a non-file: URL, Layer 0 is skipped with a loud warning and the
+  // vacuum fallbacks in the router keep outcome rendering safe (bare
+  // statuses; /_status/ absent). See README: installation.
+  const layer0Url = new URL("./layer0/", import.meta.url);
+  const layer0Root = layer0Url.protocol === "file:" ? layer0Url : undefined;
+  if (layer0Root === undefined) {
+    console.warn(
+      "[pathfinder] WARNING: Layer 0 skipped — package is not on a filesystem " +
+        `(${layer0Url.href}); outcome rendering falls back to bare statuses ` +
+        "and /_status/ is absent. See README: installation.",
+    );
+  }
+
+  // Late-bound: the manifest is only READ at request time — by then the
+  // snapshot below exists (post-boot static: v1 makes no post-boot
+  // mutability promise).
   let manifestRows: ManifestRow[] = [];
   const loaded: Loaded = await resolveTree({
-    layer0: layer0Entries(() => manifestRows),
+    layer0Root,
     manifest: () => manifestRows,
     appRoots: opts.roots ?? [],
     envRoots: envRoots(),

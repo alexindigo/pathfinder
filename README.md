@@ -90,6 +90,18 @@ No ReDoS surface — matching is a linear walk, not regex backtracking. The
 semantics are pinned by the ratified matrix in
 [docs/SEMANTICS.md](docs/SEMANTICS.md).
 
+## Installation
+
+Pathfinder walks its own packaged `layer0/` directory at boot — the default
+outcome pages and the `/_status` subtree are files in the package, discovered
+by the same filesystem walk as your endpoints. Normal installation (the
+standard `deno add jsr:@pathfinder/pathfinder` cache, or a vendored copy)
+puts the package on disk and everything works. If the package resolves over
+`https:` (no filesystem), Layer 0 is skipped with a loud warning: outcome
+rendering falls back to bare statuses and `/_status/` is absent — reproduce
+any needed `layer0/` files in your own endpoints root to restore them. Even
+our defaults are files — copy them freely.
+
 ## Run
 
 ```sh

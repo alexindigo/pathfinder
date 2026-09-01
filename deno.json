@@ -24,5 +24,8 @@
   },
   "test": {
     "include": ["tests/"]
+  },
+  "publish": {
+    "exclude": ["tests/", "bench/", "docs/dashboard.html", "deno.lock"]
   }
 }

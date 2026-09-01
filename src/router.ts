@@ -17,7 +17,7 @@ import type { TypeSpec } from "./grammar.ts";
 //   declare module "@pathfinder/pathfinder" { interface State { user?: User } }
 
 // Empty BY DESIGN: augmentation targets. Type aliases can't merge — these
-// must remain interfaces forever (sealed, ledger §10.2).
+// must remain interfaces forever (sealed design constraint).
 // deno-lint-ignore no-empty-interface
 export interface State {}
 // deno-lint-ignore no-empty-interface

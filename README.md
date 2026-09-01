@@ -1,6 +1,6 @@
-# pathfinder
-
 **Lean, mean, pathfinding state machine.**
+
+# pathfinder
 
 A lean HTTP framework for Deno — fetch-native, routes that live in the
 filesystem, and a compiled radix automaton underneath. Where Oak and Hono
@@ -69,14 +69,13 @@ trust class as editing config.
 
 ## Lean, mean
 
-Benchmarks from the [matcher lab](https://github.com/alexindigo/pathfinder-matcher-spike)
-(three matcher models on one corpus, 228 routes × 1,945 paths, zero
-mismatches):
+Benchmarks from our matcher lab (three matcher models racing on one
+corpus — 228 routes × 1,945 paths, zero mismatches):
 
 | | regex baseline | pathfinder automaton |
 |---|---|---|
 | Matrix route set, median dispatch | 21.2 µs | **4.4 µs** (4.85×) |
-| Adversarial set, median dispatch | 3.0 µs | **1.0 µs** (3–9×) |
+| Adversarial set, median dispatch | 3.0 µs | **1.0 µs** (2.5–9×) |
 | Long inputs, median dispatch | 14.0 µs | **1.4 µs** (10.1×) |
 | Construction, 228 routes | 14.8 ms | **5.4 ms** |
 | Scaling 10 → 222 routes (real shapes) | grows | ~flat (1.04× median drift) |
@@ -124,20 +123,18 @@ console.log(app.manifest());     // effective file table
 Development:
 
 ```sh
-deno task test        # suite incl. the ratified semantics matrix
-deno task check       # types
-deno task gen         # regenerate $types.d.ts for endpoint roots
-deno task gen:check   # CI drift gate for generated types
+deno task test                       # suite incl. the ratified semantics matrix
+deno task check                      # types
+deno task gen -- ./endpoints/        # regenerate $types.d.ts for endpoint roots
+deno task gen:check -- ./endpoints/  # CI drift gate for generated types
 ```
 
 ## Docs
 
 - [SEMANTICS.md](docs/SEMANTICS.md) — the `#` grammar, matching model, decode
   model, typed validation, equality constraints. Normative.
-- [Dashboard](docs/dashboard.html) — benchmark charts.
-- [Matcher lab](https://github.com/alexindigo/pathfinder-matcher-spike) — the
-  benchmark/parity lab: three matcher models (state-machine oracle, regex
-  baseline, compiled automaton), three-way corpus, divergence register.
+- [Dashboard](docs/dashboard.html) — benchmark charts; data snapshot in
+  [bench/bench-results.json](bench/bench-results.json).
 
 ## License
 

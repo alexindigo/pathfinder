@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// Filesystem loader & IoC (ledger §3, §8.3–8.4): directory path = pattern,
+// Filesystem loader & IoC: directory path = pattern,
 // `<method>.ts` = handler file. Filename grammar — the first character
 // decides; NOTHING is reserved:
 //   <letter>[A-Za-z0-9-]*.ts  → method handler (letter-start, no dots)

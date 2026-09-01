@@ -1,7 +1,7 @@
 // Public dashboard generator: regenerates docs/dashboard.html from the
 // bench-results.json snapshot. Zero-dependency inline SVG,
-// generator-not-server. Data COLLECTION lives in the pathfinder-matcher-spike
-// benchmark lab; this script only renders the snapshot into the public page.
+// generator-not-server. Data collection lives in our internal benchmark
+// lab; this script only renders the snapshot into the public page.
 
 const IN_FILE = "bench/bench-results.json";
 const OUT_FILE = "docs/dashboard.html";
@@ -469,7 +469,7 @@ const html = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pathfinder matcher spike — results</title>
+<title>Pathfinder — matcher benchmarks</title>
 <style>
 :root { --ink:#0f172a; --dim:#64748b; --card:#ffffff; --bg:#f4f6f9; --line:#e2e8f0; }
 * { box-sizing: border-box; }

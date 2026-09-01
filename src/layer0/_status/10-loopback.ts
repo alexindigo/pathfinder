@@ -2,7 +2,7 @@
 
 // Guard (primary at every rung): allow ⟺ peer ∈ loopback AND no forwarding
 // headers. XFF is a fail-closed *disqualifier* — spoofing can only deny.
-// `remoteAddr` undefined → deny (fail-closed, ledger §11.3). Non-loopback →
+// `remoteAddr` undefined → deny (fail-closed). Non-loopback →
 // masked 404. Residue (documented boundary): header-stripping proxies,
 // malicious local processes.
 

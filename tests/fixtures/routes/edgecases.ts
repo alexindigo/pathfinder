@@ -4,8 +4,7 @@ import type { Route } from "../../../src/matcher.ts";
 import { sharedHandler } from "../handlers.ts";
 
 // Deterministic anchor-stress routes. Expected values are pinned in
-// grammar_test.ts; semantic divergences between the spike's models are
-// registered in the spike's RFC.md (the SEMANTICS.md source).
+// grammar_test.ts; model divergences are registered in docs/SEMANTICS.md.
 const routes: Route[] = [
   // Many continuation occurrences / nested crossing misses (cases 1–2).
   { method: "GET", pattern: "/mm/#...a/mid/#...b/get", handler: sharedHandler },

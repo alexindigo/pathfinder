@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// Generated route types (#41-params; ledger §10.3): the loader's walker +
+// Generated route types (#41-params): the loader's walker +
 // grammar.ts as type emitter. Matryoshka architecture — per-directory
 // interfaces extending their parents, so params accumulate down dynamic
 // segments exactly as cascade/seats/overlays scope. Binding: per-dir

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// Ported from the spike's grammar_test.ts: SM/RE cross-checks dropped (they
-// live in the spike benchmark lab); pinned expected-values kept verbatim —
-// the ratified matrix is the semantics contract. Registry-v2 coercion pins
-// (ledger §4; num format ruling 2026-08-31) extend the ported set.
+// The pinned expected-values are the ratified semantics matrix — the
+// contract (docs/SEMANTICS.md). Registry-v2 coercion pins (num format
+// ruling 2026-08-31) extend the base set.
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { type Chunk, parsePattern, routeShapeKey } from "../src/grammar.ts";
@@ -377,7 +376,7 @@ Deno.test("showcase: decode model — malformed % throws only when captured", ()
   expectNoMatch("/files/a.json/%ZZ");
 });
 
-// --- Registry v2 — coercion pins (ledger §4; num ruling 2026-08-31) ----------
+// --- Registry v2 — coercion pins (num ruling 2026-08-31) ---------------------
 
 const typedMatcher = new CompiledMatcher([
   { method: "GET", pattern: "/num/#(num)n", handler: sharedHandler },
@@ -419,8 +418,8 @@ Deno.test("registry v2 — mixed typed captures in one segment", () => {
 
 // --- Edge-case corpus --------------------------------------------------------
 //
-// Deterministic anchor-stress cases. Model divergences are registered in the
-// spike's RFC.md (SEMANTICS.md source).
+// Deterministic anchor-stress cases. Model divergences are registered in
+// docs/SEMANTICS.md.
 
 const compiledEdge = new CompiledMatcher(edgecasesRoutes);
 
@@ -530,8 +529,8 @@ Deno.test("edge: // outside a crossing span rejects structurally", () => {
 //
 // The user's ruling table (2026-08-28), encoded as a contract test: each row
 // asserts the compiled matcher's decision and captures exactly. If any future
-// change flips a ratified row, this block names it. See SEMANTICS.md (spike
-// RFC.md) for the register.
+// change flips a ratified row, this block names it. See docs/SEMANTICS.md
+// for the register.
 
 const ratifiedMatcher = new CompiledMatcher([
   ...grammar2Routes,

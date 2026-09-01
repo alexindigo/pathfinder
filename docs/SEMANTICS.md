@@ -4,10 +4,10 @@ Status: **spec**. Once `@pathfinder/pathfinder@0.1.0` ships, this document is
 normative: breaking changes to anything specified here cost a major version.
 Forward-compatible valves (reserved syntax that is an error today) are marked
 **reserved**. The historical record of how each ruling was made — including
-the divergence register from the three-matcher benchmark lab — lives in the
-[pathfinder-matcher-spike](https://github.com/alexindigo/pathfinder-matcher-spike)
-repository, which remains the only place that can regenerate three-way
-comparisons.
+the divergence register from the three-matcher benchmark lab — is internal:
+this document is the public surface for the rulings themselves, and the
+published dashboard and bench snapshot are the public surface for the lab's
+products. Only the lab can regenerate three-way comparisons.
 
 ## 1. The pattern grammar (v2)
 

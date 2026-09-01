@@ -16,17 +16,37 @@ export type ParamValue = string | number | bigint;
 
 export type Params = Record<string, ParamValue>;
 
-export type Handler = (params: Params) => unknown;
+/** The matcher-level leaf handler (params in, value out). Framework-level
+ * handlers have the (request, context) face — see router.ts. */
+export type LeafHandler = (params: Params) => unknown;
 
 export interface Route {
   method: string;
   pattern: string;
-  handler: Handler;
+  handler: LeafHandler;
+  /** Opaque payload returned by lookup() on a match (framework route entry). */
+  data?: unknown;
+  /** Directory tag recorded on the route's leaf node — the miss anchor's
+   * directory for framework miss handling. Absent = untagged. */
+  dir?: string;
 }
 
 export interface Matcher {
   handle(method: string, url: string): unknown;
 }
+
+/** Anchor of a miss: the deepest tagged point the walk reached, with the
+ * captures along the anchor path and the unmatched remainder. */
+export interface LookupAnchor {
+  dir: string | null;
+  params: Params;
+  rest: string;
+}
+
+export type LookupResult =
+  | { kind: "match"; params: Params; handler: LeafHandler; data: unknown }
+  | { kind: "method-miss"; allowed: string[]; params: Params; data: unknown }
+  | { kind: "no-match"; anchor: LookupAnchor | null };
 
 interface BoundedEdge {
   name: string;
@@ -57,7 +77,11 @@ interface Node {
   boundRefs: BoundRefEdge[];
   bounded: BoundedEdge[];
   crossing: CrossingEdge | null;
-  handlers: Map<string, Handler> | null;
+  handlers: Map<string, LeafHandler> | null;
+  /** Opaque per-method payloads parallel to handlers (framework route data). */
+  data: Map<string, unknown> | null;
+  /** Directory tag (route.dir of the last route inserted here). */
+  dir: string | null;
 }
 
 function newNode(): Node {
@@ -68,6 +92,8 @@ function newNode(): Node {
     bounded: [],
     crossing: null,
     handlers: null,
+    data: null,
+    dir: null,
   };
 }
 
@@ -141,19 +167,22 @@ function insertStatic(node: Node, text: string): Node {
 
 export class CompiledMatcher implements Matcher {
   private root: Node;
+  private seen = new Map<string, string>();
 
   constructor(routes: Route[]) {
     this.root = newNode();
-    const seen = new Map<string, string>();
-    for (const r of routes) {
-      const key = r.method + ":" + routeShapeKey(r.pattern);
-      const prev = seen.get(key);
-      if (prev !== undefined) {
-        throw new Error(`Duplicate route pattern: ${r.pattern} and ${prev}`);
-      }
-      seen.set(key, r.pattern);
-      this.insert(r);
+    for (const r of routes) this.add(r);
+  }
+
+  /** Incremental insertion; same duplicate detection as construction. */
+  add(route: Route): void {
+    const key = route.method + ":" + routeShapeKey(route.pattern);
+    const prev = this.seen.get(key);
+    if (prev !== undefined) {
+      throw new Error(`Duplicate route pattern: ${route.pattern} and ${prev}`);
     }
+    this.seen.set(key, route.pattern);
+    this.insert(route);
   }
 
   private insert(route: Route): void {
@@ -212,9 +241,27 @@ export class CompiledMatcher implements Matcher {
       throw new Error(`Duplicate route: ${route.method} ${route.pattern}`);
     }
     node.handlers.set(route.method, route.handler);
+    if (route.data !== undefined) {
+      if (node.data === null) node.data = new Map();
+      node.data.set(route.method, route.data);
+    }
+    if (route.dir !== undefined) node.dir = route.dir;
   }
 
   handle(method: string, url: string): unknown {
+    const result = this.lookup(method, url);
+    return result.kind === "match" ? result.handler(result.params) : null;
+  }
+
+  /**
+   * Rich lookup: the same priority-ordered walk as handle(), returning a
+   * discriminated result. The first structurally-accepting leaf reached
+   * without the request method is recorded as a method-miss candidate (a
+   * lower-priority route may still match); the deepest tagged frame reached
+   * across the whole walk is the miss anchor, with the captures along the
+   * anchor path and the unmatched remainder.
+   */
+  lookup(method: string, url: string): LookupResult {
     // Slashes are ordinary payload bytes inside a crossing capture — no
     // global `//` rejection, no pre-walk trailing-slash strip. Trailing-slash
     // tolerance lives at leaf acceptance (exactly one `/`). Outside crossing
@@ -223,6 +270,30 @@ export class CompiledMatcher implements Matcher {
     const path = this.extractPath(url);
 
     const captures: { name: string; type: string; value: string }[] = [];
+    const toParams = (list: typeof captures): Params => {
+      // Pipeline per capture: validate RAW (at capture time) → decode →
+      // parse to the typed value.
+      const params: Params = {};
+      for (const c of list) {
+        const decoded = decodeURIComponent(c.value);
+        params[c.name] = c.type === "string"
+          ? decoded
+          : typeRegistry[c.type].parse(decoded);
+      }
+      return params;
+    };
+
+    type Capture = { name: string; type: string; value: string };
+    type MissCandidate = {
+      allowed: string[];
+      data: unknown;
+      captures: Capture[];
+    };
+    type AnchorCandidate = { dir: string; pos: number; captures: Capture[] };
+    // Holder objects — TS narrowing can't see the closure assignments.
+    const missRef: { value: MissCandidate | null } = { value: null };
+    const anchorRef: { value: AnchorCandidate | null } = { value: null };
+
     const stack: {
       node: Node;
       pos: number;
@@ -233,6 +304,12 @@ export class CompiledMatcher implements Matcher {
       capBase: number;
     }[] = [];
     const pushFrame = (node: Node, pos: number, capBase = captures.length) => {
+      if (
+        node.dir !== null &&
+        (anchorRef.value === null || anchorRef.value.pos < pos)
+      ) {
+        anchorRef.value = { dir: node.dir, pos, captures: captures.slice() };
+      }
       stack.push({
         node,
         pos,
@@ -242,6 +319,14 @@ export class CompiledMatcher implements Matcher {
         candsIdx: 0,
         capBase,
       });
+    };
+    const recordMiss = (node: Node) => {
+      if (missRef.value !== null || node.handlers === null) return;
+      missRef.value = {
+        allowed: [...node.handlers.keys()],
+        data: node.data === null ? undefined : node.data.values().next().value,
+        captures: captures.slice(),
+      };
     };
     pushFrame(this.root, 0);
 
@@ -255,17 +340,14 @@ export class CompiledMatcher implements Matcher {
         if (atEnd || toleratedTrailingSlash) {
           const handler = f.node.handlers?.get(method);
           if (handler !== undefined) {
-            // Pipeline per capture: validate RAW (at capture time) → decode
-            // → parse to the typed value.
-            const params: Params = {};
-            for (const c of captures) {
-              const decoded = decodeURIComponent(c.value);
-              params[c.name] = c.type === "string"
-                ? decoded
-                : typeRegistry[c.type].parse(decoded);
-            }
-            return handler(params);
+            return {
+              kind: "match",
+              params: toParams(captures),
+              handler,
+              data: f.node.data?.get(method),
+            };
           }
+          if (f.node.handlers !== null) recordMiss(f.node);
           if (atEnd) {
             captures.length = f.capBase;
             stack.pop();
@@ -378,7 +460,23 @@ export class CompiledMatcher implements Matcher {
         stack.pop();
       }
     }
-    return null;
+    if (missRef.value !== null) {
+      return {
+        kind: "method-miss",
+        allowed: missRef.value.allowed,
+        params: toParams(missRef.value.captures),
+        data: missRef.value.data,
+      };
+    }
+    const anchor = anchorRef.value;
+    return {
+      kind: "no-match",
+      anchor: anchor === null ? null : {
+        dir: anchor.dir,
+        params: toParams(anchor.captures),
+        rest: path.slice(anchor.pos),
+      },
+    };
   }
 
   /**

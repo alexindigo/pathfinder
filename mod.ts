@@ -8,6 +8,7 @@
  * `<method>.ts` file = handler.
  */
 
+// Grammar + compiled automaton
 export {
   type Chunk,
   type DynamicChunk,
@@ -20,9 +21,39 @@ export {
 
 export {
   CompiledMatcher,
-  type Handler,
+  type LeafHandler,
+  type LookupAnchor,
+  type LookupResult,
   type Matcher,
   type Params,
   type ParamValue,
   type Route,
 } from "./src/matcher.ts";
+
+// HTTP contract
+export {
+  allowedMethods,
+  coerceResult,
+  ContractViolation,
+  html,
+  HttpError,
+  json,
+  redirect,
+  text,
+} from "./src/http.ts";
+
+// Framework layer
+export type {
+  App,
+  Context,
+  Handler,
+  Meta,
+  Middleware,
+  Miss,
+  PathfinderBody,
+  PathfinderRequest,
+  PostFn,
+  RemoteAddress,
+  ResponseView,
+  State,
+} from "./src/router.ts";

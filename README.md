@@ -80,7 +80,12 @@ corpus — 228 routes × 1,945 paths, zero mismatches):
 | Construction, 228 routes | 14.8 ms | **5.4 ms** |
 | Scaling 10 → 222 routes (real shapes) | grows | ~flat (1.04× median drift) |
 
+<details>
+<summary><strong>Latency by path shape</strong> — ⚠️ light mode warning</summary>
+
 ![Latency by path shape](docs/latency-by-shape.png)
+
+</details>
 
 Full numbers and charts: [docs/dashboard.html](docs/dashboard.html) ·
 snapshot: [bench/bench-results.json](bench/bench-results.json).

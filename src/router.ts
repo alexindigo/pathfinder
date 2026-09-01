@@ -6,8 +6,10 @@
 // lands with the loader.
 
 import { coerceResult, ContractViolation, HttpError } from "./http.ts";
+import { BodyLimitError, limitTransform } from "./body_limit.ts";
 import type { LookupResult, Params } from "./matcher.ts";
 import { CompiledMatcher } from "./matcher.ts";
+import type { TypeSpec } from "./grammar.ts";
 
 // --- Augmentable interfaces (module augmentation; declared as interfaces
 // forever — type aliases can't merge). One idiom for apps AND middleware:
@@ -263,6 +265,7 @@ class RequestBody implements PathfinderBody {
   #streamOut: ReadableStream<Uint8Array> | null | undefined = undefined;
   #selfRead = false;
   #rawConsumer: string | null = null;
+  #limit: number | null = null;
 
   constructor(raw: Request) {
     this.#raw = raw;
@@ -275,6 +278,12 @@ class RequestBody implements PathfinderBody {
 
   allowMiddlewareAccess(): void {
     this.#middlewareAccess = true;
+  }
+
+  /** Body size limit (meta `bodyLimit`, bytes). Set before any read; one
+   * counting transform guards both consumption styles. */
+  setLimit(maxBytes: number): void {
+    this.#limit = maxBytes;
   }
 
   /** `_raw` consumption mid-chain: the handler's guard error names the
@@ -313,10 +322,15 @@ class RequestBody implements PathfinderBody {
   get stream(): ReadableStream<Uint8Array> | null {
     this.#guardStream();
     if (this.#streamOut === undefined) {
-      let stream = this.#raw.body;
+      let stream: ReadableStream<Uint8Array> | null = this.#raw.body;
       if (stream !== null) {
+        if (this.#limit !== null) {
+          stream = stream.pipeThrough(
+            limitTransform(this.#limit),
+          ) as ReadableStream<Uint8Array>;
+        }
         for (const transform of this.#transforms) {
-          stream = stream.pipeThrough(transform);
+          stream = stream.pipeThrough(transform) as ReadableStream<Uint8Array>;
         }
       }
       this.#streamOut = stream;
@@ -365,10 +379,15 @@ class RequestBody implements PathfinderBody {
   }
 
   #composed(): ReadableStream<Uint8Array> | null {
-    let stream = this.#raw.body;
+    let stream: ReadableStream<Uint8Array> | null = this.#raw.body;
     if (stream !== null) {
+      if (this.#limit !== null) {
+        stream = stream.pipeThrough(
+          limitTransform(this.#limit),
+        ) as ReadableStream<Uint8Array>;
+      }
       for (const transform of this.#transforms) {
-        stream = stream.pipeThrough(transform);
+        stream = stream.pipeThrough(transform) as ReadableStream<Uint8Array>;
       }
     }
     return stream;
@@ -513,13 +532,17 @@ export interface AddRouteOptions {
 export class Router {
   #matcher = new CompiledMatcher([]);
   #entries = new Map<string, RouteEntry>();
-  #dirMiddleware = new Map<string, Middleware[]>();
+  #dirMiddleware = new Map<
+    string,
+    { middleware: Middleware; disableStreaming: boolean }[]
+  >();
   // outcome code → dir → renderer
   #outcomes = new Map<number, Map<string, Handler>>();
   #app: object;
 
-  constructor(app: object = {}) {
+  constructor(app: object = {}, opts?: { types?: Record<string, TypeSpec> }) {
     this.#app = app;
+    this.#matcher = new CompiledMatcher([], { types: opts?.types });
   }
 
   add(
@@ -555,9 +578,34 @@ export class Router {
   }
 
   /** Register middleware for a directory (ordered as given: parent dirs
-   * before child, seats ascending within a dir — the loader's job). */
-  setDirMiddleware(dir: string, middleware: Middleware[]): void {
-    this.#dirMiddleware.set(dir, middleware);
+   * before child, seats ascending within a dir — the loader's job). An entry
+   * may carry options: `{ middleware, disableStreaming }` (the named-export
+   * options of a middleware file). */
+  setDirMiddleware(
+    dir: string,
+    entries:
+      (Middleware | { middleware: Middleware; disableStreaming?: boolean })[],
+  ): void {
+    this.#dirMiddleware.set(
+      dir,
+      entries.map((e) =>
+        typeof e === "function" ? { middleware: e, disableStreaming: false } : {
+          middleware: e.middleware,
+          disableStreaming: e.disableStreaming === true,
+        }
+      ),
+    );
+  }
+
+  /** Streaming forfeited under this dir? (any ancestor middleware flagged) */
+  #dirStreaming(dir: string): boolean {
+    for (const [d, entries] of this.#dirMiddleware) {
+      if (
+        entries.some((e) => e.disableStreaming) &&
+        (d === "" || dir === d || dir.startsWith(d + "/"))
+      ) return true;
+    }
+    return false;
   }
 
   setOutcome(code: number, dir: string, handler: Handler): void {
@@ -593,7 +641,9 @@ export class Router {
       .filter((d) => d === "" || dir === d || dir.startsWith(d + "/"))
       .sort((a, b) => a.length - b.length);
     const chain: Middleware[] = [];
-    for (const d of dirs) chain.push(...this.#dirMiddleware.get(d)!);
+    for (const d of dirs) {
+      for (const e of this.#dirMiddleware.get(d)!) chain.push(e.middleware);
+    }
     return chain;
   }
 
@@ -604,7 +654,11 @@ export class Router {
 
     if (result.kind === "match") {
       const entry = result.data as RouteEntry;
-      if (entry.disableStreaming) body.allowMiddlewareAccess();
+      if (entry.disableStreaming || this.#dirStreaming(entry.dir)) {
+        body.allowMiddlewareAccess();
+      }
+      const limit = (entry.meta as { bodyLimit?: unknown }).bodyLimit;
+      if (typeof limit === "number") body.setLimit(limit);
       const view = buildRequestView(request, path, result.params, body, info);
       const context = buildContext(this.#app, Object.freeze(entry.meta));
       return await this.#dispatch(
@@ -713,6 +767,10 @@ export class Router {
           { detail: error.detail },
           { status: error.status, headers: error.headers },
         );
+      } else if (error instanceof BodyLimitError) {
+        // 413 outcome (map grows additively; subtree 413.ts customizes).
+        context.error = error;
+        response = await this.#renderOutcome(413, anchorDir, request, context);
       } else {
         // 500 outcome → 500 renderer cascade; vacuum = bare status. Loud.
         console.error("[pathfinder] 500:", error);

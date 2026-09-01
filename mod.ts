@@ -57,3 +57,20 @@ export type {
   ResponseView,
   State,
 } from "./src/router.ts";
+
+// Factory + loader
+export { envRoots, pathfinder } from "./src/pathfinder.ts";
+export type {
+  ManifestRow,
+  PathfinderApp,
+  PathfinderOptions,
+} from "./src/pathfinder.ts";
+export { walkRoot } from "./src/loader.ts";
+export type { Entry, ResolveOptions } from "./src/loader.ts";
+
+// Body limits
+export { BodyLimitError, GiB, KiB, MiB } from "./src/body_limit.ts";
+
+// Generated route types
+export { dirParams, generateTypes } from "./src/types-gen.ts";
+export type { GenResult } from "./src/types-gen.ts";

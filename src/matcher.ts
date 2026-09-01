@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-import { parsePattern, routeShapeKey, typeRegistry } from "./grammar.ts";
+import {
+  parsePattern,
+  routeShapeKey,
+  typeRegistry,
+  type TypeSpec,
+} from "./grammar.ts";
 
 // Compiled chunk automaton: all routes are parsed into chunks and inserted
 // into a radix automaton walked over the raw request path. Dispatch is
@@ -168,15 +173,22 @@ function insertStatic(node: Node, text: string): Node {
 export class CompiledMatcher implements Matcher {
   private root: Node;
   private seen = new Map<string, string>();
+  /** Effective type registry: built-ins + per-instance custom types (immutable
+   * after boot — the factory's `types` option). */
+  private registry: Record<string, TypeSpec>;
 
-  constructor(routes: Route[]) {
+  constructor(routes: Route[], opts?: { types?: Record<string, TypeSpec> }) {
     this.root = newNode();
+    this.registry = opts?.types
+      ? { ...typeRegistry, ...opts.types }
+      : typeRegistry;
     for (const r of routes) this.add(r);
   }
 
   /** Incremental insertion; same duplicate detection as construction. */
   add(route: Route): void {
-    const key = route.method + ":" + routeShapeKey(route.pattern);
+    const key = route.method + ":" +
+      routeShapeKey(route.pattern, this.registry);
     const prev = this.seen.get(key);
     if (prev !== undefined) {
       throw new Error(`Duplicate route pattern: ${route.pattern} and ${prev}`);
@@ -187,7 +199,7 @@ export class CompiledMatcher implements Matcher {
 
   private insert(route: Route): void {
     let node = this.root;
-    const chunks = parsePattern(route.pattern);
+    const chunks = parsePattern(route.pattern, this.registry);
     const bound = new Set<string>();
     for (let ci = 0; ci < chunks.length; ci++) {
       const chunk = chunks[ci];
@@ -216,7 +228,7 @@ export class CompiledMatcher implements Matcher {
             : null;
           const validate = chunk.type === "string"
             ? null
-            : typeRegistry[chunk.type].validate;
+            : this.registry[chunk.type].validate;
           let edge = node.bounded.find((b) =>
             b.name === chunk.name && b.type === chunk.type &&
             b.anchor === anchor
@@ -278,7 +290,7 @@ export class CompiledMatcher implements Matcher {
         const decoded = decodeURIComponent(c.value);
         params[c.name] = c.type === "string"
           ? decoded
-          : typeRegistry[c.type].parse(decoded);
+          : this.registry[c.type].parse(decoded);
       }
       return params;
     };

@@ -73,7 +73,10 @@ export const typeRegistry: Record<string, TypeSpec> = {
 const NAME_RE = /^[$_A-Za-z][$_A-Za-z0-9]*$/;
 const IDENT_CHAR = /[$_A-Za-z0-9]/;
 
-export function parsePattern(pattern: string): Chunk[] {
+export function parsePattern(
+  pattern: string,
+  registry: Record<string, TypeSpec> = typeRegistry,
+): Chunk[] {
   const chunks: Chunk[] = [];
   const boundTypes = new Map<string, string>();
   let staticBuf = "";
@@ -102,7 +105,7 @@ export function parsePattern(pattern: string): Chunk[] {
         throw new Error(`Unclosed "(" type annotation in pattern "${pattern}"`);
       }
       type = pattern.slice(i + 1, close);
-      if (!(type in typeRegistry)) {
+      if (!(type in registry)) {
         throw new Error(`Unknown type "${type}" in pattern "${pattern}"`);
       }
       explicitType = true;
@@ -170,8 +173,11 @@ export function parsePattern(pattern: string): Chunk[] {
  * prepends the HTTP method. Injective because static text never contains
  * `#` and every marker starts with `#`.
  */
-export function routeShapeKey(pattern: string): string {
-  return parsePattern(pattern).map((c) =>
+export function routeShapeKey(
+  pattern: string,
+  registry: Record<string, TypeSpec> = typeRegistry,
+): string {
+  return parsePattern(pattern, registry).map((c) =>
     c.kind === "static"
       ? c.text
       : c.rest

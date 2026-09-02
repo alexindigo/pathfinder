@@ -66,7 +66,18 @@ export type {
   PathfinderOptions,
 } from "./src/pathfinder.ts";
 export { walkRoot } from "./src/loader.ts";
-export type { Entry, ResolveOptions } from "./src/loader.ts";
+export type {
+  Entry,
+  EntryModule,
+  IndexRoot,
+  LayerIndexEntry,
+  ResolveOptions,
+  Root,
+} from "./src/loader.ts";
+
+// Tree index generator (packaged trees)
+export { generateIndex } from "./src/index-gen.ts";
+export type { GenIndexOptions, GenIndexResult } from "./src/index-gen.ts";
 
 // Body limits
 export { BodyLimitError, GiB, KiB, MiB } from "./src/body_limit.ts";

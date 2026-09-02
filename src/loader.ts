@@ -37,7 +37,50 @@ export interface ManifestRow {
 
 // --- Classified entries --------------------------------------------------------
 
-type Mod = { default?: unknown } & Record<string, unknown>;
+/** A loaded tree-file module (namespace object). */
+export type EntryModule = { default?: unknown } & Record<string, unknown>;
+
+/** File-kind classification (the filename grammar): the walk and the index
+ * generator share exactly this. `invalid` is a build error — the caller
+ * renders it with path context. */
+export type FileKind =
+  | { kind: "method"; method: string }
+  | { kind: "middleware"; name: string }
+  | { kind: "status"; code: number }
+  | { kind: "ignored" } // .d.ts — type-only compile-time shadows
+  | { kind: "invalid" };
+
+/** Classify one file by basename. First character decides; nothing reserved. */
+export function classifyFile(basename: string): FileKind {
+  if (basename.endsWith(".d.ts")) return { kind: "ignored" };
+  if (METHOD_FILE.test(basename)) {
+    return { kind: "method", method: basename.slice(0, -3).toUpperCase() };
+  }
+  if (MIDDLEWARE_FILE.test(basename)) {
+    return { kind: "middleware", name: basename.slice(0, -3) };
+  }
+  if (STATUS_FILE.test(basename)) {
+    const code = parseInt(basename.slice(0, -3), 10);
+    if (OUTCOME_CODES.has(code)) return { kind: "status", code };
+    return { kind: "invalid" };
+  }
+  return { kind: "invalid" };
+}
+
+/** The build-error message for a file that matches nothing — single source,
+ * rendered with path context by the caller. */
+export function invalidFileError(display: string, file: string): Error {
+  if (STATUS_FILE.test(file.split("/").pop() ?? file)) {
+    return new Error(
+      `${display} — "${file}" is not in the outcome map (${
+        [...OUTCOME_CODES].sort().join(", ")
+      })`,
+    );
+  }
+  return new Error(
+    `${display} — the endpoints tree contains route files only (method, <digits>-<label> middleware, <digits> outcome, or .d.ts)`,
+  );
+}
 
 /** A classified, imported file entry (from an fs walk or Layer 0). */
 export type Entry =
@@ -49,7 +92,7 @@ export type Entry =
     method: string;
     pattern: string;
     dir: string;
-    mod: Mod;
+    mod: EntryModule;
   }
   | {
     kind: "middleware";
@@ -58,7 +101,7 @@ export type Entry =
     file: string;
     dir: string;
     name: string;
-    mod: Mod;
+    mod: EntryModule;
   }
   | {
     kind: "status";
@@ -67,7 +110,7 @@ export type Entry =
     file: string;
     code: number;
     dir: string;
-    mod: Mod;
+    mod: EntryModule;
   };
 
 interface RouteReg {
@@ -287,7 +330,7 @@ function shapeOf(
 }
 
 /** Named exports = meta → context.meta (open bag; `default` excluded). */
-function metaOf(mod: Mod): Meta {
+function metaOf(mod: EntryModule): Meta {
   const meta: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(mod)) {
     if (k !== "default") meta[k] = v;
@@ -326,15 +369,17 @@ export async function walkRoot(
       const display = rootPath.replace(/\/$/, "") + "/" + file;
       const absFile = rootPath + file;
 
-      if (base.endsWith(".d.ts")) continue; // ignored: type-only shadows
+      const classified = classifyFile(base);
 
-      if (METHOD_FILE.test(base)) {
+      if (classified.kind === "ignored") continue; // .d.ts — type-only shadows
+
+      if (classified.kind === "method") {
         entries.push({
           kind: "method",
           layer,
           root: rootPath,
           file: display,
-          method: base.slice(0, -3).toUpperCase(),
+          method: classified.method,
           pattern: patternOf(dirRel),
           dir: dirPatternOf(dirRel),
           mod: await import(toFileUrl(absFile).href),
@@ -342,43 +387,33 @@ export async function walkRoot(
         continue;
       }
 
-      if (MIDDLEWARE_FILE.test(base)) {
+      if (classified.kind === "middleware") {
         entries.push({
           kind: "middleware",
           layer,
           root: rootPath,
           file: display,
           dir: dirPatternOf(dirRel),
-          name: base.slice(0, -3),
+          name: classified.name,
           mod: await import(toFileUrl(absFile).href),
         });
         continue;
       }
 
-      if (STATUS_FILE.test(base)) {
-        const code = parseInt(base.slice(0, -3), 10);
-        if (!OUTCOME_CODES.has(code)) {
-          throw new Error(
-            `${display} — "${file}" is not in the outcome map (${
-              [...OUTCOME_CODES].sort().join(", ")
-            })`,
-          );
-        }
+      if (classified.kind === "status") {
         entries.push({
           kind: "status",
           layer,
           root: rootPath,
           file: display,
-          code,
+          code: classified.code,
           dir: dirPatternOf(dirRel),
           mod: await import(toFileUrl(absFile).href),
         });
         continue;
       }
 
-      throw new Error(
-        `${display} — the endpoints tree contains route files only (method, <digits>-<label> middleware, <digits> outcome, or .d.ts)`,
-      );
+      throw invalidFileError(display, file);
     }
   }
 
@@ -390,27 +425,119 @@ function absolute(path: string): string {
   return path.startsWith("/") ? path : `${Deno.cwd()}/${path}`;
 }
 
-function patternOf(dirRel: string): string {
+export function patternOf(dirRel: string): string {
   // "api/#roomId/" → "/api/#roomId"; "" → "/"
   if (dirRel === "") return "/";
   return "/" + dirRel.slice(0, -1);
 }
 
-function dirPatternOf(dirRel: string): string {
+export function dirPatternOf(dirRel: string): string {
   // The file's directory as a chain key: "" for root-level files.
   if (dirRel === "") return "";
   return "/" + dirRel.slice(0, -1);
 }
 
+// --- Tree indexes (packaged trees; Amendment 3) --------------------------------
+
+/** An entry produced by a generated tree index (`gen index <dir>` →
+ * `<dir>.ts`) — the same facts the fs walk produces, minus resolution-time
+ * layer/root. */
+export interface LayerIndexEntry {
+  kind: "method" | "middleware" | "status";
+  /** Method files: uppercased verb (e.g. "GET"). */
+  method?: string;
+  /** Method files: the pattern (e.g. "/api/#roomId"). */
+  pattern?: string;
+  /** Status files: the outcome code (e.g. 404). */
+  code?: number;
+  /** Middleware files: seat-label filename (e.g. "10-loopback"). */
+  name?: string;
+  /** Chain key of the file's directory ("" at tree root). */
+  dir: string;
+  /** Tree-relative path (manifest display). */
+  path: string;
+  /** The imported module namespace (static import in the index module). */
+  mod: EntryModule;
+}
+
+/** A self-describing packaged tree: entries plus the tree's own base URL
+ * (`new URL("./", import.meta.url)` — the index module knows where it lives,
+ * whatever the install mode). */
+export interface IndexRoot {
+  root: string;
+  entries: LayerIndexEntry[];
+}
+
+/** A root: a filesystem path / file: URL to walk, or an imported tree index
+ * (packaged trees that exist only in the module graph). */
+export type Root = string | URL | IndexRoot;
+
+export function isIndexRoot(root: Root): root is IndexRoot {
+  return typeof root === "object" && !(root instanceof URL) &&
+    Array.isArray((root as IndexRoot).entries);
+}
+
+/** Manifest-display root for an index/tree URL: `file:` → path; jsr.io →
+ * `jsr:@scope/name@ver`; anything else → the URL as-is. */
+export function displayRoot(rootUrl: string): string {
+  if (rootUrl.startsWith("file:")) {
+    return decodeURIComponent(new URL(rootUrl).pathname);
+  }
+  const jsr = /^https?:\/\/jsr\.io\/(@[^/]+\/[^/]+)\/([^/]+)\//.exec(rootUrl);
+  if (jsr !== null) return `jsr:${jsr[1]}@${jsr[2]}`;
+  return rootUrl;
+}
+
+function indexEntries(root: IndexRoot, layer: number): Entry[] {
+  const display = displayRoot(root.root);
+  return root.entries.map((entry) => {
+    switch (entry.kind) {
+      case "method":
+        return {
+          kind: "method",
+          layer,
+          root: display,
+          file: entry.path,
+          method: entry.method!,
+          pattern: entry.pattern!,
+          dir: entry.dir,
+          mod: entry.mod,
+        };
+      case "middleware":
+        return {
+          kind: "middleware",
+          layer,
+          root: display,
+          file: entry.path,
+          dir: entry.dir,
+          name: entry.name!,
+          mod: entry.mod,
+        };
+      case "status":
+        return {
+          kind: "status",
+          layer,
+          root: display,
+          file: entry.path,
+          code: entry.code!,
+          dir: entry.dir,
+          mod: entry.mod,
+        };
+    }
+  });
+}
+
 // --- Assembly -------------------------------------------------------------------
 
 export interface ResolveOptions {
-  /** Layer 0 — the package's own root, walked like any other (Amendment 1:
-   * real files, no synthetic entries). App roots and overlays shadow or
-   * tombstone its files identically (last wins, per file). */
+  /** Layer 0 — the package's own tree as an index module (index-primary). */
+  layer0?: IndexRoot;
+  /** @deprecated transitional — the walk-based Layer 0 root; the factory
+   * switches to `layer0` (index module) in the index-primary change. */
   layer0Root?: string | URL;
-  /** Layer 1 app roots — missing root is an error. */
-  appRoots: (string | URL)[];
+  /** Layer 1 app roots — missing root is an error; `https:` string roots are
+   * rejected (generate an index and pass the imported module instead). */
+  appRoots: Root[];
   /** Layer 2+ overlay roots — missing root is warn+skip. */
   envRoots?: (string | URL)[];
   /** context.app data. */
@@ -431,13 +558,31 @@ export async function resolveTree(opts: ResolveOptions): Promise<Loaded> {
   const resolver = new Resolver();
   resolver.registry = opts.types;
 
+  if (opts.layer0 !== undefined) {
+    for (const entry of indexEntries(opts.layer0, 0)) resolver.add(entry);
+  }
+
   if (opts.layer0Root !== undefined) {
-    // The package's own tree — a missing layer0Root is a broken install,
-    // not a warn+skip case. Let it throw.
+    // Transitional walk-based Layer 0 (Amendment 1) — the factory switches to
+    // the index module in the index-primary change. A missing layer0Root is
+    // a broken install, not a warn+skip case. Let it throw.
     for (const entry of await walkRoot(opts.layer0Root, 0)) resolver.add(entry);
   }
 
   for (const root of opts.appRoots) {
+    if (isIndexRoot(root)) {
+      for (const entry of indexEntries(root, 1)) resolver.add(entry);
+      continue;
+    }
+    if (
+      root instanceof URL ? root.protocol !== "file:" : /^https?:/i.test(root)
+    ) {
+      throw new Error(
+        `[pathfinder] cannot walk a URL root (${
+          root instanceof URL ? root.href : root
+        }) — generate an index (\`gen index <dir>\`) and pass the imported module`,
+      );
+    }
     let entries: Entry[];
     try {
       entries = await walkRoot(root, 1);

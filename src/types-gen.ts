@@ -57,7 +57,7 @@ export function dirParams(dirname: string): Map<string, string> {
   return params;
 }
 
-async function rootDirPath(root: string | URL): Promise<string> {
+function rootDirPath(root: string | URL): string {
   const url = root instanceof URL ? root : toFileUrlLike(root);
   const path = decodeURIComponent(url.pathname);
   return path.endsWith("/") ? path : path + "/";
@@ -74,8 +74,8 @@ function encodePath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
-async function buildTree(root: string | URL): Promise<string> {
-  return await rootDirPath(root);
+function buildTree(root: string | URL): string {
+  return rootDirPath(root);
 }
 
 function render(node: DirNode, isRoot: boolean): string {
@@ -112,8 +112,8 @@ export async function generateTypes(
   const files: string[] = [];
   const drift: string[] = [];
   for (const root of roots) {
-    const basePath = await buildTree(root);
-    async function emit(rel: string, node: DirNode): Promise<void> {
+    const basePath = buildTree(root);
+    const emit = async (rel: string, node: DirNode): Promise<void> => {
       const content = render(node, rel === "");
       const path = basePath + rel + "$types.d.ts";
       files.push(path);
@@ -129,9 +129,9 @@ export async function generateTypes(
         await Deno.writeTextFile(path, content);
       }
       for (const child of node.children.values()) await emit(child.rel, child);
-    }
+    };
     const tree = newDir("");
-    async function visit(rel: string, node: DirNode): Promise<void> {
+    const visit = async (rel: string, node: DirNode): Promise<void> => {
       const dirPath = basePath + rel;
       let items: Deno.DirEntry[] = [];
       try {
@@ -148,7 +148,7 @@ export async function generateTypes(
         node.children.set(item.name, child);
         await visit(childRel, child);
       }
-    }
+    };
     await visit("", tree);
     await emit("", tree);
   }

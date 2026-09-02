@@ -530,11 +530,9 @@ function indexEntries(root: IndexRoot, layer: number): Entry[] {
 // --- Assembly -------------------------------------------------------------------
 
 export interface ResolveOptions {
-  /** Layer 0 — the package's own tree as an index module (index-primary). */
+  /** Layer 0 — the package's own tree as an index module (index-primary,
+   * Amendment 3). */
   layer0?: IndexRoot;
-  /** @deprecated transitional — the walk-based Layer 0 root; the factory
-   * switches to `layer0` (index module) in the index-primary change. */
-  layer0Root?: string | URL;
   /** Layer 1 app roots — missing root is an error; `https:` string roots are
    * rejected (generate an index and pass the imported module instead). */
   appRoots: Root[];
@@ -560,13 +558,6 @@ export async function resolveTree(opts: ResolveOptions): Promise<Loaded> {
 
   if (opts.layer0 !== undefined) {
     for (const entry of indexEntries(opts.layer0, 0)) resolver.add(entry);
-  }
-
-  if (opts.layer0Root !== undefined) {
-    // Transitional walk-based Layer 0 (Amendment 1) — the factory switches to
-    // the index module in the index-primary change. A missing layer0Root is
-    // a broken install, not a warn+skip case. Let it throw.
-    for (const entry of await walkRoot(opts.layer0Root, 0)) resolver.add(entry);
   }
 
   for (const root of opts.appRoots) {

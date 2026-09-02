@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "exports": {
     ".": "./mod.ts",
-    "./gen": "./gen.ts"
+    "./gen": "./gen.ts",
+    "./layer0": "./src/layer0.ts"
   },
   "tasks": {
     "test": "deno test --allow-read --allow-net --allow-env --allow-write tests/",
     "check": "deno check mod.ts gen.ts src/ tests/",
     "gen": "deno run --allow-read --allow-write gen.ts",
-    "gen:check": "deno run --allow-read gen.ts --check",
+    "gen:check": "deno run --allow-read gen.ts index --check src/layer0",
     "dashboard": "deno run --allow-read --allow-write bench/generate_dashboard.ts"
   },
   "imports": {

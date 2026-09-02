@@ -96,15 +96,34 @@ semantics are pinned by the ratified matrix in
 
 ## Installation
 
-Pathfinder walks its own packaged `layer0/` directory at boot — the default
-outcome pages and the `/_status` subtree are files in the package, discovered
-by the same filesystem walk as your endpoints. Normal installation (the
-standard `deno add jsr:@pathfinder/pathfinder` cache, or a vendored copy)
-puts the package on disk and everything works. If the package resolves over
-`https:` (no filesystem), Layer 0 is skipped with a loud warning: outcome
-rendering falls back to bare statuses and `/_status/` is absent — reproduce
-any needed `layer0/` files in your own endpoints root to restore them. Even
-our defaults are files — copy them freely.
+```sh
+deno add jsr:@pathfinder/pathfinder@^0.1.0
+deno install
+```
+
+Pathfinder's own Layer 0 (default outcome pages + the `/_status` subtree)
+ships as real files in `src/layer0/` **and** a generated index module
+(`src/layer0.ts`) that statically imports them. The factory imports the
+index, so `deno install` materializes the whole tree into Deno's cache as
+part of the normal import graph — Layer 0 works identically on a checkout
+and on a registry install, and offline thereafter. No filesystem or
+permission assumptions; even our defaults are files — copy them freely.
+
+**Packaging your own trees** (framework authors shipping default routes in a
+JSR package): generate the same kind of index for your tree and pass the
+imported module as a root — packaged trees first, fs roots after (last
+wins):
+
+```sh
+deno run jsr:@pathfinder/pathfinder/gen index ./endpoints   # → ./endpoints.ts
+```
+
+```ts
+import { pathfinder } from "@pathfinder/pathfinder";
+import fxTree from "@your-scope/your-framework/layer1"; // generated index
+
+const app = await pathfinder({ roots: [fxTree, "./endpoints/"] });
+```
 
 ## Run
 

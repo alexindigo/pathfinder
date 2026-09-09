@@ -56,6 +56,7 @@ export type {
   RemoteAddress,
   ResponseView,
   State,
+  WebSocketUpgrade,
 } from "./src/router.ts";
 
 // Factory + loader

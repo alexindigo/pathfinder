@@ -47,6 +47,15 @@ export interface PathfinderBody {
   pipeThrough(transform: TransformStream): void;
 }
 
+/** The result of `request.upgrade()`: a placeholder `Response` the handler
+ * must return (the framework performs the actual host upgrade when it
+ * materializes that response), and the `socket` promise resolving once the
+ * upgrade is performed. */
+export interface WebSocketUpgrade {
+  response: Response;
+  socket: Promise<WebSocket>;
+}
+
 /** The request view — input world. `query` is lazy and cached; `headers` is
  * a REFERENCE to the native Headers; `_raw` is the escape hatch (underscore =
  * you own the consequences; expandos don't survive `_raw.clone()`). */
@@ -57,10 +66,91 @@ export interface PathfinderRequest<P = Params> {
   method: string;
   headers: Headers;
   body: PathfinderBody;
+  /** Declare a WebSocket upgrade for this request — synchronously, no host
+   * call yet. Validates the upgrade headers at call time (host-shaped
+   * TypeError on failure); the framework performs the upgrade when the
+   * returned placeholder Response materializes. One upgrade per request.
+   * The handler owns the socket lifecycle. */
+  upgrade(): WebSocketUpgrade;
   remoteAddr?: RemoteAddress;
   /** Resolves when the response has been fully sent on the wire. */
   completed?: Promise<void>;
   _raw: Request;
+}
+
+// --- WebSocket upgrade state (engine-internal, per request) ------------------
+
+interface UpgradeState {
+  raw: Request;
+  declared: boolean;
+  placeholder: Response | null;
+  socket: Promise<WebSocket>;
+  settled: boolean;
+  resolve(ws: WebSocket): void;
+  reject(reason: unknown): void;
+}
+
+function createUpgradeState(raw: Request): UpgradeState {
+  let resolveSocket!: (ws: WebSocket) => void;
+  let rejectSocket!: (reason: unknown) => void;
+  let settled = false;
+  const socket = new Promise<WebSocket>((resolve, reject) => {
+    resolveSocket = resolve;
+    rejectSocket = reject;
+  });
+  // Cancellation rejections may have no consumer attached (the app only
+  // subscribed via `.then`) — mark the rejection handled so it never
+  // surfaces as an unhandled rejection; real consumers still receive it.
+  socket.catch(() => {});
+  return {
+    raw,
+    declared: false,
+    placeholder: null,
+    socket,
+    get settled() {
+      return settled;
+    },
+    resolve(ws: WebSocket) {
+      if (!settled) {
+        settled = true;
+        resolveSocket(ws);
+      }
+    },
+    reject(reason: unknown) {
+      if (!settled) {
+        settled = true;
+        rejectSocket(reason);
+      }
+    },
+  };
+}
+
+/** Upgrade-header validation with the host's own message shapes (mirrors
+ * Deno's ext/http/02_websocket.ts: comma-token, case-insensitive). */
+function validateUpgradeHeaders(headers: Headers): void {
+  const upgrade = headers.get("upgrade");
+  if (
+    upgrade === null ||
+    !upgrade.split(",").some((t) => t.trim().toLowerCase() === "websocket")
+  ) {
+    throw new TypeError(
+      "Invalid Header: 'upgrade' header must contain 'websocket'",
+    );
+  }
+  const connection = headers.get("connection");
+  if (
+    connection === null ||
+    !connection.split(",").some((t) => t.trim().toLowerCase() === "upgrade")
+  ) {
+    throw new TypeError(
+      "Invalid Header: 'connection' header must contain 'Upgrade'",
+    );
+  }
+  if (headers.get("sec-websocket-key") === null) {
+    throw new TypeError(
+      "Invalid Header: 'sec-websocket-key' header must be set",
+    );
+  }
 }
 
 // --- Misses (§8.3 data table; "miss" naming reserved for 404/405/204) --------
@@ -135,10 +225,13 @@ class ResponseViewImpl implements ResponseView {
   #headersProxy: Headers | null = null;
   #headersReal: Headers | null = null;
   #headersTouched = false;
+  #headersDeleted = new Set<string>();
   #transforms: TransformStream[] = [];
+  #upgrade: UpgradeState | null;
 
-  constructor(base: Response) {
+  constructor(base: Response, upgrade: UpgradeState | null = null) {
     this.#base = base;
+    this.#upgrade = upgrade;
   }
 
   get _raw(): Response {
@@ -169,6 +262,9 @@ class ResponseViewImpl implements ResponseView {
             return (...args: unknown[]) => {
               if (prop === "set" || prop === "append" || prop === "delete") {
                 self.#touchHeaders();
+                if (prop === "delete") {
+                  self.#headersDeleted.add(String(args[0]));
+                }
                 const real = self.#headersReal as unknown as Record<
                   string,
                   (...a: unknown[]) => unknown
@@ -209,6 +305,7 @@ class ResponseViewImpl implements ResponseView {
     this.#headersProxy = null;
     this.#headersReal = null;
     this.#headersTouched = false;
+    this.#headersDeleted.clear();
     this.#transforms = [];
   }
 
@@ -217,12 +314,88 @@ class ResponseViewImpl implements ResponseView {
       this.#transforms.length > 0;
   }
 
+  /** Recorded header mutations applied in place on `target` — the upgrade
+   * response's headers stay mutable, so post-fn stamps (CORS etc.) land
+   * without reconstruction. */
+  #applyHeadersInPlace(target: Headers): void {
+    if (this.#headersReal !== null) {
+      for (const [key, value] of this.#headersReal) target.set(key, value);
+    }
+    for (const key of this.#headersDeleted) target.delete(key);
+  }
+
+  #dropUpgradeEdits(): void {
+    if (this.#transforms.length > 0) {
+      console.debug(
+        "[pathfinder] body transforms dropped on WebSocket upgrade — headers are the only meaningful edits",
+      );
+    }
+    if (this.#status !== null && this.#status !== 101) {
+      console.debug(
+        "[pathfinder] status edit dropped on WebSocket upgrade — headers are the only meaningful edits",
+      );
+    }
+  }
+
+  /** The new API: the handler returned the recorded placeholder — perform
+   * the host upgrade NOW (one framework-owned spot: Deno today; Bun/Node
+   * adapters later), apply recorded header mutations in place on the host
+   * response's mutable headers, and ship the host response. */
+  #materializeUpgrade(): Response {
+    const upgrade = this.#upgrade!;
+    const { socket, response } = Deno.upgradeWebSocket(upgrade.raw);
+    upgrade.resolve(socket);
+    this.#applyHeadersInPlace(response.headers);
+    this.#dropUpgradeEdits();
+    return response;
+  }
+
+  /** Any other 101 base (legacy handler-does-host-call paths): never
+   * reconstruct — a rebuilt 101 is not an upgrade response and the socket
+   * would be lost. Recorded header mutations apply in place; status/body
+   * edits are dropped. */
+  #materializeUpgradeInPlace(): Response {
+    this.#applyHeadersInPlace(this.#base.headers);
+    this.#dropUpgradeEdits();
+    return this.#base;
+  }
+
   /** Materialization: identity handoff is the fast path when all edit sets
    * are empty — an optimization, not a stance. Causal knowledge, not
    * arithmetic: the materializer is the sole wirer of transforms, so it
    * knows it changed the body and deletes the stale Content-Length without
    * ever computing one. */
   materialize(): Response {
+    const upgrade = this.#upgrade;
+    if (upgrade !== null && upgrade.declared) {
+      if (this.#base === upgrade.placeholder) {
+        return this.#materializeUpgrade();
+      }
+      // The placeholder never reached materialization. The handler
+      // returning anything else is a loud ContractViolation (caught in
+      // #dispatch); a post-fn wholesale-replacing it = the post-fn decided
+      // the request doesn't upgrade — cancelled, debug-logged, the socket
+      // promise rejects.
+      if (!upgrade.settled) {
+        console.debug(
+          "[pathfinder] WebSocket upgrade cancelled — the upgrade placeholder was replaced",
+        );
+        upgrade.reject(
+          new Error(
+            "WebSocket upgrade cancelled — the upgrade placeholder response was replaced",
+          ),
+        );
+      }
+      if (this.#base.status === 101) {
+        // Pathological: a 101 the framework did not perform the upgrade for.
+        throw new ContractViolation(
+          "a 101 response without a framework-performed upgrade cannot ship",
+        );
+      }
+    }
+
+    const status = this.#status ?? this.#base.status;
+    if (status === 101) return this.#materializeUpgradeInPlace();
     if (!this.#editsPending) return this.#base; // identity fast path
 
     let body = this.#base.body;
@@ -233,7 +406,6 @@ class ResponseViewImpl implements ResponseView {
       headers = new Headers(this.#base.headers);
       this.#headersReal = headers;
     }
-    const status = this.#status ?? this.#base.status;
     if (this.#transforms.length > 0 && body !== null) {
       for (const transform of this.#transforms) {
         body = body.pipeThrough(transform);
@@ -464,6 +636,7 @@ function buildRequestView(
   params: Params,
   body: RequestBody,
   info: unknown,
+  upgrade: UpgradeState,
 ): PathfinderRequest {
   let query: URLSearchParams | undefined;
   const remoteAddr = extractRemoteAddr(info);
@@ -482,6 +655,26 @@ function buildRequestView(
     method: { value: raw.method, enumerable: true },
     headers: { value: raw.headers, enumerable: true },
     body: { value: body, enumerable: true },
+    upgrade: {
+      enumerable: true,
+      value: (): WebSocketUpgrade => {
+        if (upgrade.declared) {
+          // Host message shape — ext/http/00_serve.ts `_throwIfUpgraded`.
+          throw new TypeError(
+            "request.upgrade() already called (Already upgraded)",
+          );
+        }
+        validateUpgradeHeaders(raw.headers);
+        upgrade.declared = true;
+        // Placeholder only — never shipped; the host's real 101 response
+        // (with `sec-websocket-accept` etc.) replaces it at materialization.
+        upgrade.placeholder = new Response(null, {
+          status: 101,
+          statusText: "Switching Protocols",
+        });
+        return { response: upgrade.placeholder, socket: upgrade.socket };
+      },
+    },
     ...(remoteAddr !== undefined
       ? { remoteAddr: { value: remoteAddr, enumerable: true } }
       : {}),
@@ -666,6 +859,7 @@ export class Router {
   async handle(request: Request, info?: unknown): Promise<Response> {
     const path = new URL(request.url).pathname;
     const body = new RequestBody(request);
+    const upgrade = createUpgradeState(request);
     const result = this.#matcher.lookup(request.method, path);
 
     if (result.kind === "match") {
@@ -675,7 +869,14 @@ export class Router {
       }
       const limit = (entry.meta as { bodyLimit?: unknown }).bodyLimit;
       if (typeof limit === "number") body.setLimit(limit);
-      const view = buildRequestView(request, path, result.params, body, info);
+      const view = buildRequestView(
+        request,
+        path,
+        result.params,
+        body,
+        info,
+        upgrade,
+      );
       const context = buildContext(
         this.#app,
         Object.freeze(entry.meta),
@@ -685,13 +886,14 @@ export class Router {
         view,
         context,
         body,
+        upgrade,
         entry.chain ?? this.chainFor(entry.dir),
         entry.handler,
         entry.dir,
       );
     }
 
-    const view = buildRequestView(request, path, {}, body, info);
+    const view = buildRequestView(request, path, {}, body, info, upgrade);
     const context = buildContext(this.#app, Object.freeze({}), this.#manifest);
 
     if (result.kind === "method-miss") {
@@ -710,6 +912,7 @@ export class Router {
         view,
         context,
         body,
+        upgrade,
         this.chainFor(anchorDir),
         handler,
         anchorDir,
@@ -731,6 +934,7 @@ export class Router {
       view,
       context,
       body,
+      upgrade,
       this.chainFor(anchorDir),
       handler,
       anchorDir,
@@ -743,6 +947,7 @@ export class Router {
     request: PathfinderRequest,
     context: Context,
     body: RequestBody,
+    upgrade: UpgradeState,
     chain: Middleware[],
     handler: Handler,
     anchorDir: string,
@@ -779,8 +984,21 @@ export class Router {
       if (response === null) {
         body.setPhase("handler");
         response = coerceResult(await handler(request, context));
+        if (upgrade.declared && response !== upgrade.placeholder) {
+          // Flag set but a different value returned — loud contract
+          // violation; the upgrade placeholder must be the return value.
+          upgrade.reject(
+            new Error(
+              "WebSocket upgrade cancelled — the handler returned a value other than the upgrade placeholder",
+            ),
+          );
+          throw new ContractViolation(
+            "handler called request.upgrade() but returned a different value — return the upgrade placeholder to perform the upgrade",
+          );
+        }
       }
     } catch (error) {
+      if (upgrade.declared && !upgrade.settled) upgrade.reject(error);
       if (error instanceof HttpError) {
         // Renders directly — cascades are for framework-generated outcomes.
         response = Response.json(
@@ -800,7 +1018,7 @@ export class Router {
     }
 
     // Post-fns — LIFO (inner→outer), always run.
-    const view = new ResponseViewImpl(response);
+    const view = new ResponseViewImpl(response, upgrade);
     try {
       for (let i = postFns.length - 1; i >= 0; i--) {
         const postFn = postFns[i];
@@ -826,6 +1044,7 @@ export class Router {
       }
     } catch (error) {
       console.error("[pathfinder] post-fn phase failure:", error);
+      if (upgrade.declared && !upgrade.settled) upgrade.reject(error);
       return new Response(null, { status: 500 });
     }
 

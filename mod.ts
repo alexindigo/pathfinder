@@ -83,6 +83,17 @@ export type { GenIndexOptions, GenIndexResult } from "./src/index-gen.ts";
 // Body limits
 export { BodyLimitError, GiB, KiB, MiB } from "./src/body_limit.ts";
 
+// Shipped optional middleware set
+export { cors } from "./src/middleware/cors.ts";
+export type { CorsOptions } from "./src/middleware/cors.ts";
+export { clientIp } from "./src/middleware/client_ip.ts";
+export type { ClientIpOptions } from "./src/middleware/client_ip.ts";
+export { logger } from "./src/middleware/logger.ts";
+export { timing } from "./src/middleware/timing.ts";
+export { accessLog } from "./src/middleware/access_log.ts";
+export { compress } from "./src/middleware/compress.ts";
+export type { CompressOptions } from "./src/middleware/compress.ts";
+
 // Generated route types
 export { dirParams, generateTypes } from "./src/types-gen.ts";
 export type { GenResult } from "./src/types-gen.ts";

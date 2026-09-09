@@ -3,16 +3,16 @@
 # pathfinder
 
 A lean HTTP framework for Deno — fetch-native, routes that live in the
-filesystem, and a compiled radix automaton underneath. Where Oak and Hono
-give you route tables, pathfinder gives you a routing tree you can patch in
+filesystem, and a compiled radix automaton underneath. Where Oak and Hono give
+you route tables, pathfinder gives you a routing tree you can patch in
 production with a mounted directory.
 
 ## Routes are files
 
-Every character of the `#` pattern grammar is legal in file and directory
-names on every OS (unlike `:name`, `*rest`, or `[x]`), so the filesystem
-*is* the route table: **the directory path is the pattern, the `<method>.ts`
-file is the handler.**
+Every character of the `#` pattern grammar is legal in file and directory names
+on every OS (unlike `:name`, `*rest`, or `[x]`), so the filesystem _is_ the
+route table: **the directory path is the pattern, the `<method>.ts` file is the
+handler.**
 
 ```
 endpoints/
@@ -26,10 +26,10 @@ endpoints/
   static/#...path/get.ts         → GET    /static/*  (greedy rest — also the SPA/catch-all recipe)
 ```
 
-No `index.ts` lies, no reserved segments — directories are 100% URL
-namespace. Middleware lives beside the routes it wraps
-(`api/10-auth.ts`), outcome pages are digit files (`404.ts`, `500.ts`), and
-`.d.ts` files are ignored (they're the generated types: `deno task gen`).
+No `index.ts` lies, no reserved segments — directories are 100% URL namespace.
+Middleware lives beside the routes it wraps (`api/10-auth.ts`), outcome pages
+are digit files (`404.ts`, `500.ts`), and `.d.ts` files are ignored (they're the
+generated types: `deno task gen`).
 
 Handlers get `(request, context)` and return domain values:
 
@@ -44,14 +44,14 @@ export default async (request, context) => {
 ```
 
 Throw `new HttpError(404, "…")` for errors; return a `Response` for full
-control; stream `ReadableStream`s — bodies are streams, nothing buffers
-unless you ask.
+control; stream `ReadableStream`s — bodies are streams, nothing buffers unless
+you ask.
 
 ## Hackability is the point
 
-`PATHFINDER_USER_ENDPOINTS` points at additional endpoint roots. Routes
-found there **override or augment the app's own — no changes to the app's
-code required.**
+`PATHFINDER_USER_ENDPOINTS` points at additional endpoint roots. Routes found
+there **override or augment the app's own — no changes to the app's code
+required.**
 
 ```sh
 docker run \
@@ -63,22 +63,22 @@ docker run \
 
 One file replaces one endpoint (`export default null` = tombstone — remove a
 vulnerable route in prod with one mounted file). `/_status` reports the
-effective file table; the startup log prints the method histogram. Whoever
-can mount a volume and set an env var already owns the deployment — same
-trust class as editing config.
+effective file table; the startup log prints the method histogram. Whoever can
+mount a volume and set an env var already owns the deployment — same trust class
+as editing config.
 
 ## Lean, mean
 
-Benchmarks from our matcher lab (three matcher models racing on one
-corpus — 228 routes × 1,945 paths, zero mismatches):
+Benchmarks from our matcher lab (three matcher models racing on one corpus — 228
+routes × 1,945 paths, zero mismatches):
 
-| | regex baseline | pathfinder automaton |
-|---|---|---|
-| Matrix route set, median dispatch | 21.2 µs | **4.4 µs** (4.85×) |
-| Adversarial set, median dispatch | 3.0 µs | **1.0 µs** (2.5–9×) |
-| Long inputs, median dispatch | 14.0 µs | **1.4 µs** (10.1×) |
-| Construction, 228 routes | 14.8 ms | **5.4 ms** |
-| Scaling 10 → 222 routes (real shapes) | grows | ~flat (1.04× median drift) |
+|                                       | regex baseline | pathfinder automaton       |
+| ------------------------------------- | -------------- | -------------------------- |
+| Matrix route set, median dispatch     | 21.2 µs        | **4.4 µs** (4.85×)         |
+| Adversarial set, median dispatch      | 3.0 µs         | **1.0 µs** (2.5–9×)        |
+| Long inputs, median dispatch          | 14.0 µs        | **1.4 µs** (10.1×)         |
+| Construction, 228 routes              | 14.8 ms        | **5.4 ms**                 |
+| Scaling 10 → 222 routes (real shapes) | grows          | ~flat (1.04× median drift) |
 
 <details>
 <summary><strong>Latency by path shape</strong> — ⚠️ light mode warning</summary>
@@ -87,8 +87,8 @@ corpus — 228 routes × 1,945 paths, zero mismatches):
 
 </details>
 
-Full numbers and charts: [docs/dashboard.html](docs/dashboard.html) ·
-snapshot: [bench/bench-results.json](bench/bench-results.json).
+Full numbers and charts: [docs/dashboard.html](docs/dashboard.html) · snapshot:
+[bench/bench-results.json](bench/bench-results.json).
 
 No ReDoS surface — matching is a linear walk, not regex backtracking. The
 semantics are pinned by the ratified matrix in
@@ -101,18 +101,17 @@ deno add jsr:@pathfinder/pathfinder@^0.1.0
 deno install
 ```
 
-Pathfinder's own Layer 0 (default outcome pages + the `/_status` subtree)
-ships as real files in `src/layer0/` **and** a generated index module
-(`src/layer0.ts`) that statically imports them. The factory imports the
-index, so `deno install` materializes the whole tree into Deno's cache as
-part of the normal import graph — Layer 0 works identically on a checkout
-and on a registry install, and offline thereafter. No filesystem or
-permission assumptions; even our defaults are files — copy them freely.
+Pathfinder's own Layer 0 (default outcome pages + the `/_status` subtree) ships
+as real files in `src/layer0/` **and** a generated index module
+(`src/layer0.ts`) that statically imports them. The factory imports the index,
+so `deno install` materializes the whole tree into Deno's cache as part of the
+normal import graph — Layer 0 works identically on a checkout and on a registry
+install, and offline thereafter. No filesystem or permission assumptions; even
+our defaults are files — copy them freely.
 
-**Packaging your own trees** (framework authors shipping default routes in a
-JSR package): generate the same kind of index for your tree and pass the
-imported module as a root — packaged trees first, fs roots after (last
-wins):
+**Packaging your own trees** (framework authors shipping default routes in a JSR
+package): generate the same kind of index for your tree and pass the imported
+module as a root — packaged trees first, fs roots after (last wins):
 
 ```sh
 deno run jsr:@pathfinder/pathfinder/gen index ./endpoints   # → ./endpoints.ts
@@ -135,13 +134,13 @@ deno run --allow-net --allow-read your-server.ts
 import { pathfinder } from "@pathfinder/pathfinder";
 
 const app = await pathfinder({
-  roots: ["./endpoints/"],       // app roots; overlays come via env var
-  app: { rooms, config },        // context.app — your services
+  roots: ["./endpoints/"], // app roots; overlays come via env var
+  app: { rooms, config }, // context.app — your services
   // types: { uuid: { validate, parse } },  // custom param types
 });
 
 Deno.serve(app);
-console.log(app.manifest());     // effective file table
+console.log(app.manifest()); // effective file table
 ```
 
 Development:
@@ -157,6 +156,12 @@ deno task gen:check -- ./endpoints/  # CI drift gate for generated types
 
 - [SEMANTICS.md](docs/SEMANTICS.md) — the `#` grammar, matching model, decode
   model, typed validation, equality constraints. Normative.
+- [Dev notes](docs/dev.md) — watch mode, two listeners, cookies, graceful
+  shutdown, WebSocket upgrade.
+- [Error shapes](docs/error-shapes.md) — when the framework's default isn't your
+  API's contract: shaped bodies, `ParseError`, status-page files.
+- [Coming from Hono](docs/COMING-FROM-HONO.md) — concept map and the four
+  deltas.
 - [Dashboard](docs/dashboard.html) — benchmark charts; data snapshot in
   [bench/bench-results.json](bench/bench-results.json).
 

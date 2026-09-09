@@ -7,19 +7,31 @@
 
 import { text } from "./response.ts";
 
-/** Thrown by handlers/middleware to short-circuit to a status + `{"detail"}`
- * JSON body (globnotes/FastAPI shape). Optional headers ride along (e.g.
- * `WWW-Authenticate` on 401). */
+/** Thrown by handlers/middleware to short-circuit to a status with an
+ * arbitrary body — payload-agnostic (ruled 2026-09-08, superseding the
+ * sealed `{"detail"}` envelope): the second argument is the response BODY,
+ * verbatim, coerced by the same rules as the handler return contract —
+ * object/array → JSON; string → text/plain; `Response` → itself with this
+ * error's status applied; absent → empty body. Optional headers ride along
+ * (e.g. `WWW-Authenticate` on 401) and win over body-implied headers.
+ *
+ * ```ts
+ * // Matrix-shaped errors, full throw ergonomics:
+ * throw new HttpError(401, { errcode: "M_UNKNOWN_TOKEN", error: "Invalid token" });
+ * // FastAPI/globnotes-style envelope, written explicitly:
+ * throw new HttpError(404, { detail: "Not Found" });
+ * ```
+ */
 export class HttpError extends Error {
   status: number;
-  detail: unknown;
+  body: unknown;
   headers?: HeadersInit;
 
-  constructor(status: number, detail?: unknown, headers?: HeadersInit) {
+  constructor(status: number, body?: unknown, headers?: HeadersInit) {
     super(`HTTP ${status}`);
     this.name = "HttpError";
     this.status = status;
-    this.detail = detail;
+    this.body = body;
     this.headers = headers;
   }
 }

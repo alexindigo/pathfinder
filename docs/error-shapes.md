@@ -2,41 +2,46 @@
 
 pathfinder's engine has one error model, and it does not change per app:
 uncaught errors map to the `500` outcome, and
-`throw new HttpError(status,
-detail)` renders `{"detail": …}` with that status.
-That is the right default — it is honest about what the framework knows. But
-most real APIs have their own error body (`{"errcode", "error"}` for Matrix,
-`{"errors"}` for GraphQL- adjacent APIs), and client faults must not render as
-500s. This page is the toolbox for making the framework's outcomes speak your
-contract, without changing the framework.
+`throw new HttpError(status, body)` renders **the body verbatim** with that
+status — coerced by the same rules as the handler return contract (object/array
+→ JSON, string → text/plain, `Response` → itself, absent → empty). No envelope
+is imposed; most real APIs get their exact error body from the throw
+(`{"errcode", "error"}` for Matrix, `{"errors"}` for GraphQL-adjacent APIs), and
+client faults need never render as 500s. This page is the toolbox, plus the
+corners where the framework's defaults stop and your contract starts.
 
-## Rule one: return, don't throw, when the body is the contract
-
-A thrown `HttpError` always renders `{"detail": …}`. When your API needs a
-shaped body, return the response yourself:
+## `HttpError`: the body is the payload
 
 ```ts
-import { json } from "@pathfinder/pathfinder/response";
+import { HttpError } from "@pathfinder/pathfinder";
 
-export default () =>
-  json({ errcode: "M_UNKNOWN", error: "Not found." }, {
-    status: 404,
-  });
+// Matrix-shaped errors, full throw ergonomics:
+throw new HttpError(400, { errcode: "M_NOT_JSON", error: "Content not JSON." });
+
+// FastAPI/globnotes-style envelope, written explicitly when you want it:
+throw new HttpError(404, { detail: "Not Found" });
+
+// Plain string → text/plain. Absent body → empty. Headers ride along:
+throw new HttpError(401, "invalid token", { "www-authenticate": "Bearer" });
 ```
 
-This is not a workaround — the return contract is the contract. Handlers may
-return a `Response` at any time; coercion never interprets intent.
+The second argument is the response **body, verbatim** — the same coercion the
+handler return contract uses, with the error's status and headers applied on top
+(explicit error headers win over body-implied ones). A `Response` body ships
+as-is with the error's status. Post-fns always run after the throw — a root CORS
+middleware still stamps the response, `accessLog()` still records the
+disposition.
 
 ## Parse errors: `ParseError` + `parseJson`
 
 A malformed request body is a client fault, but the framework's default maps any
 uncaught error to `500` — the framework does not know that a `SyntaxError` from
 `JSON.parse` means "bad client input". The shipped convenience makes the mapping
-a one-line catch:
+a one-line catch, and the verbatim-`HttpError` throw finishes it:
 
 ```ts
-import { parseJson, ParseError } from "@pathfinder/pathfinder/body";
-import { json } from "@pathfinder/pathfinder/response";
+import { ParseError, parseJson } from "@pathfinder/pathfinder/body";
+import { HttpError } from "@pathfinder/pathfinder";
 
 export default async (request) => {
   try {
@@ -45,8 +50,9 @@ export default async (request) => {
     return await parseJson(request);
   } catch (error) {
     if (error instanceof ParseError) {
-      return json({ errcode: "M_NOT_JSON", error: "Content not JSON." }, {
-        status: 400,
+      throw new HttpError(400, {
+        errcode: "M_NOT_JSON",
+        error: "Content not JSON.",
       });
     }
     throw error;
@@ -58,6 +64,22 @@ export default async (request) => {
 through untouched. Repeated per endpoint? Put it in a helper, or mount a
 `disableStreaming` middleware in that subtree that maps the throw for its
 routes.
+
+## Return, don't throw, for computed responses
+
+`HttpError` covers the error paths. For ordinary responses whose body is the
+contract, return the response — the return contract is the contract:
+
+```ts
+import { json } from "@pathfinder/pathfinder/response";
+
+export default () =>
+  json({ errcode: "M_UNKNOWN", error: "Not found." }, {
+    status: 404,
+  });
+```
+
+Handlers may return a `Response` at any time; coercion never interprets intent.
 
 ## Framework-generated outcomes: `<digits>.ts` files
 
@@ -88,17 +110,6 @@ export default (request, context) =>
 Inside a `500.ts`, `context.error` holds the thrown value; inside
 `404.ts`/`405.ts`, `context.miss` holds the match data. A renderer may return
 any status it wants (stealth 404-masking is legal); the digits select the
-outcome, not the response status.
-
-## `HttpError` for everything else
-
-When the `{"detail": …}` shape is acceptable, `HttpError` stays the honest
-ergonomic throw:
-
-```ts
-throw new HttpError(401, "invalid token", { "www-authenticate": "Bearer" });
-```
-
-Renders `{"detail": "invalid token"}` with status 401 and your headers. Post-fns
-always run after it — a root CORS middleware still stamps the response,
-`accessLog()` still records the disposition.
+outcome, not the response status. The package's own default outcome pages
+(including their `{"detail": …}` bodies) are exactly such files — override them
+per subtree whenever you want.

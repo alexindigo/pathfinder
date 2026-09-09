@@ -118,7 +118,44 @@ Deno.test("contract: Response is the identity branch", async () => {
   assertStrictEquals(res, original); // identity fast path
 });
 
-Deno.test("contract: HttpError → {detail} + status + headers", async () => {
+Deno.test("contract: HttpError body verbatim — string → text/plain", async () => {
+  const router = makeRouter();
+  router.add("GET", "/", () => {
+    throw new HttpError(401, "bad token");
+  });
+  const res = await dispatch(router, GET("/"));
+  assertEquals(res.status, 401);
+  assertEquals(res.headers.get("content-type"), "text/plain;charset=UTF-8");
+  assertEquals(await res.text(), "bad token");
+});
+
+Deno.test("contract: HttpError body verbatim — object → JSON, no envelope", async () => {
+  const router = makeRouter();
+  router.add("GET", "/", () => {
+    throw new HttpError(400, {
+      errcode: "M_NOT_JSON",
+      error: "Content not JSON.",
+    });
+  });
+  const res = await dispatch(router, GET("/"));
+  assertEquals(res.status, 400);
+  assertEquals(await res.json(), {
+    errcode: "M_NOT_JSON",
+    error: "Content not JSON.",
+  });
+});
+
+Deno.test("contract: HttpError absent body → empty body, status applied", async () => {
+  const router = makeRouter();
+  router.add("GET", "/", () => {
+    throw new HttpError(503);
+  });
+  const res = await dispatch(router, GET("/"));
+  assertEquals(res.status, 503);
+  assertEquals(await res.text(), "");
+});
+
+Deno.test("contract: HttpError headers applied and win over body-implied", async () => {
   const router = makeRouter();
   router.add("GET", "/", () => {
     throw new HttpError(401, "bad token", {
@@ -128,7 +165,23 @@ Deno.test("contract: HttpError → {detail} + status + headers", async () => {
   const res = await dispatch(router, GET("/"));
   assertEquals(res.status, 401);
   assertEquals(res.headers.get("www-authenticate"), `Bearer realm="x"`);
-  assertEquals(await res.json(), { detail: "bad token" });
+  assertEquals(await res.text(), "bad token");
+});
+
+Deno.test("contract: HttpError(Response) → itself with the error's status", async () => {
+  const router = makeRouter();
+  router.add("GET", "/", () => {
+    throw new HttpError(
+      418,
+      new Response("teapot", { status: 200, headers: { "x-from": "body" } }),
+      { "x-error": "yes" },
+    );
+  });
+  const res = await dispatch(router, GET("/"));
+  assertEquals(res.status, 418);
+  assertEquals(res.headers.get("x-from"), "body", "body headers preserved");
+  assertEquals(res.headers.get("x-error"), "yes", "error headers applied");
+  assertEquals(await res.text(), "teapot");
 });
 
 Deno.test("contract: primitives/null are loud 500 violations", async () => {

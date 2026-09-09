@@ -1001,10 +1001,23 @@ export class Router {
       if (upgrade.declared && !upgrade.settled) upgrade.reject(error);
       if (error instanceof HttpError) {
         // Renders directly — cascades are for framework-generated outcomes.
-        response = Response.json(
-          { detail: error.detail },
-          { status: error.status, headers: error.headers },
-        );
+        try {
+          response = renderHttpError(error);
+        } catch (coerceError) {
+          // A body the return contract can't represent is a programming
+          // error — loud 500, never a silent fallback.
+          console.error(
+            "[pathfinder] HttpError body failed to coerce:",
+            coerceError,
+          );
+          context.error = coerceError;
+          response = await this.#renderOutcome(
+            500,
+            anchorDir,
+            request,
+            context,
+          );
+        }
       } else if (error instanceof BodyLimitError) {
         // 413 outcome (map grows additively; subtree 413.ts customizes).
         context.error = error;
@@ -1075,4 +1088,22 @@ function describeValue(value: unknown): string {
     return Array.isArray(value) ? "an array" : "an object";
   }
   return `a ${typeof value}`;
+}
+
+/** Renders a thrown HttpError: the body verbatim via the return-contract
+ * coercion (object/array → JSON, string → text/plain, Response → itself,
+ * absent → empty), the error's status and headers applied on top. Nothing
+ * renders an envelope — the body IS the payload. */
+function renderHttpError(error: HttpError): Response {
+  const headers = error.headers === undefined
+    ? new Headers()
+    : new Headers(error.headers); // the error's headers win
+  if (error.body === undefined) {
+    return new Response(null, { status: error.status, headers });
+  }
+  const rendered = coerceResult(error.body);
+  for (const [key, value] of rendered.headers) {
+    if (!headers.has(key)) headers.set(key, value);
+  }
+  return new Response(rendered.body, { status: error.status, headers });
 }

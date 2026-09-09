@@ -2,7 +2,7 @@
 // `gen index --check` enforces drift.
 // SPDX-License-Identifier: LGPL-3.0-only
 
-import type { IndexRoot, LayerIndexEntry } from "./loader.ts";
+import type { IndexRoot, LayerIndexEntry } from "./loader/mod.ts";
 import * as m0 from "./layer0/204.ts";
 import * as m1 from "./layer0/404.ts";
 import * as m2 from "./layer0/405.ts";

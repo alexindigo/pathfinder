@@ -12,9 +12,9 @@
 // `export default` = handler (null = tombstone); named exports = meta.
 
 import { toFileUrl } from "@std/path";
-import { routeShapeKey, type TypeSpec } from "./grammar.ts";
-import type { Handler, Meta, Middleware } from "./router.ts";
-import { Router } from "./router.ts";
+import { routeShapeKey, type TypeSpec } from "../grammar/pattern.ts";
+import type { Handler, Meta, Middleware } from "../router.ts";
+import { Router } from "../router.ts";
 
 const METHOD_FILE = /^[A-Za-z][A-Za-z0-9-]*\.ts$/;
 const MIDDLEWARE_FILE = /^[0-9]+-[A-Za-z0-9-]*\.ts$/;

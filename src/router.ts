@@ -7,10 +7,10 @@
 
 import { coerceResult, ContractViolation, HttpError } from "./http.ts";
 import { BodyLimitError, limitTransform } from "./body_limit.ts";
-import type { ManifestRow } from "./loader.ts";
-import type { LookupResult, Params } from "./matcher.ts";
-import { CompiledMatcher } from "./matcher.ts";
-import type { TypeSpec } from "./grammar.ts";
+import type { ManifestRow } from "./loader/mod.ts";
+import type { LookupResult, Params } from "./grammar/matcher.ts";
+import { CompiledMatcher } from "./grammar/matcher.ts";
+import type { TypeSpec } from "./grammar/pattern.ts";
 
 // --- Augmentable interfaces (module augmentation; declared as interfaces
 // forever — type aliases can't merge). One idiom for apps AND middleware:

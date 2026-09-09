@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-import type { Route } from "../../../src/matcher.ts";
+import type { Route } from "../../../src/grammar/matcher.ts";
 import { sharedHandler } from "../handlers.ts";
 
 const routes: Route[] = [

@@ -9,11 +9,11 @@
 // `.fetch` alias is RESERVED (additive) for Workers/Bun `export default`
 // compat — not shipped in v1.
 
-import { resolveTree } from "./loader.ts";
-import type { Loaded, ManifestRow } from "./loader.ts";
+import { resolveTree } from "./loader/mod.ts";
+import type { Loaded, ManifestRow } from "./loader/mod.ts";
 import layer0Tree from "./layer0.ts";
-import type { LookupResult } from "./matcher.ts";
-import type { TypeSpec } from "./grammar.ts";
+import type { LookupResult } from "./grammar/matcher.ts";
+import type { TypeSpec } from "./grammar/pattern.ts";
 
 export interface PathfinderOptions {
   /** Layer 1 app roots (Layer 0 ships in the package; Layer 2+ is

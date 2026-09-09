@@ -5,11 +5,11 @@
 // bodyLimit, custom types.
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { resolveTree } from "../src/loader.ts";
-import type { ManifestRow } from "../src/loader.ts";
+import { resolveTree } from "../src/loader/mod.ts";
+import type { ManifestRow } from "../src/loader/mod.ts";
 import { envRoots, pathfinder } from "../src/pathfinder.ts";
 import type { PathfinderApp } from "../src/pathfinder.ts";
-import { GiB, KiB, MiB } from "../src/body_limit.ts";
+import { GiB, KiB, MiB } from "../src/body.ts";
 
 const FIX = new URL("./fixtures/endpoints/", import.meta.url);
 const APP = new URL("app/", FIX);

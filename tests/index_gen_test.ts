@@ -4,9 +4,9 @@
 // parity with the fs walk, and resolver integration of index roots.
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { generateIndex } from "../src/index-gen.ts";
-import { displayRoot, isIndexRoot, resolveTree } from "../src/loader.ts";
-import type { IndexRoot } from "../src/loader.ts";
+import { generateIndex } from "../src/loader/index-gen.ts";
+import { displayRoot, isIndexRoot, resolveTree } from "../src/loader/mod.ts";
+import type { IndexRoot } from "../src/loader/mod.ts";
 
 async function makeTree(): Promise<string> {
   const tmp = await Deno.makeTempDir();
@@ -48,7 +48,7 @@ Deno.test("index-gen: sibling emission with static imports + entries", async () 
     );
     assert(
       result.content.includes(
-        `import type { IndexRoot, LayerIndexEntry } from "./loader.ts";`,
+        `import type { IndexRoot, LayerIndexEntry } from "./loader/mod.ts";`,
       ),
     );
     assert(
@@ -75,7 +75,7 @@ Deno.test("index-gen: --from rewrites the type import", async () => {
       from: "@pathfinder/pathfinder",
     });
     assert(result.content.includes('from "@pathfinder/pathfinder";'));
-    assert(!result.content.includes('from "./loader.ts"'));
+    assert(!result.content.includes('from "./loader/mod.ts"'));
   } finally {
     await Deno.remove(tmp, { recursive: true });
   }

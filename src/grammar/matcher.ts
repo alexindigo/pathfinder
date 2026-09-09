@@ -5,7 +5,7 @@ import {
   routeShapeKey,
   typeRegistry,
   type TypeSpec,
-} from "./grammar.ts";
+} from "./pattern.ts";
 
 // Compiled chunk automaton: all routes are parsed into chunks and inserted
 // into a radix automaton walked over the raw request path. Dispatch is

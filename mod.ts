@@ -6,60 +6,12 @@
  * A lean HTTP framework for Deno. Routes are the filesystem:
  * the `#` pattern grammar is filesystem-native, directory path = pattern,
  * `<method>.ts` file = handler.
+ *
+ * This root module is the framework face. Namespaced subpaths:
+ * `./response` (response factories + ResponseView), `./middleware`
+ * (the shipped optional set), `./body` (parse convenience + limits),
+ * `./grammar` (pattern grammar + matcher), `./loader` (loader + generators).
  */
-
-// Grammar + compiled automaton
-export {
-  type Chunk,
-  type DynamicChunk,
-  parsePattern,
-  routeShapeKey,
-  type StaticChunk,
-  typeRegistry,
-  type TypeSpec,
-} from "./src/grammar.ts";
-
-export {
-  CompiledMatcher,
-  type LeafHandler,
-  type LookupAnchor,
-  type LookupResult,
-  type Matcher,
-  type Params,
-  type ParamValue,
-  type Route,
-} from "./src/matcher.ts";
-
-// HTTP contract
-export {
-  allowedMethods,
-  coerceResult,
-  ContractViolation,
-  html,
-  HttpError,
-  json,
-  ParseError,
-  parseJson,
-  redirect,
-  text,
-} from "./src/http.ts";
-
-// Framework layer
-export type {
-  App,
-  Context,
-  Handler,
-  Meta,
-  Middleware,
-  Miss,
-  PathfinderBody,
-  PathfinderRequest,
-  PostFn,
-  RemoteAddress,
-  ResponseView,
-  State,
-  WebSocketUpgrade,
-} from "./src/router.ts";
 
 // Factory + loader
 export { envRoots, pathfinder } from "./src/pathfinder.ts";
@@ -68,34 +20,24 @@ export type {
   PathfinderApp,
   PathfinderOptions,
 } from "./src/pathfinder.ts";
-export { walkRoot } from "./src/loader.ts";
+
+// Engine types (the handler & middleware face)
 export type {
-  Entry,
-  EntryModule,
-  IndexRoot,
-  LayerIndexEntry,
-  ResolveOptions,
-  Root,
-} from "./src/loader.ts";
+  App,
+  Context,
+  Handler,
+  Meta,
+  Middleware,
+  Miss,
+  PathfinderRequest,
+  PostFn,
+  RemoteAddress,
+  State,
+  WebSocketUpgrade,
+} from "./src/router.ts";
 
-// Tree index generator (packaged trees)
-export { generateIndex } from "./src/index-gen.ts";
-export type { GenIndexOptions, GenIndexResult } from "./src/index-gen.ts";
+// Error contract
+export { HttpError } from "./src/http.ts";
 
-// Body limits
-export { BodyLimitError, GiB, KiB, MiB } from "./src/body_limit.ts";
-
-// Shipped optional middleware set
-export { cors } from "./src/middleware/cors.ts";
-export type { CorsOptions } from "./src/middleware/cors.ts";
-export { clientIp } from "./src/middleware/client_ip.ts";
-export type { ClientIpOptions } from "./src/middleware/client_ip.ts";
-export { logger } from "./src/middleware/logger.ts";
-export { timing } from "./src/middleware/timing.ts";
-export { accessLog } from "./src/middleware/access_log.ts";
-export { compress } from "./src/middleware/compress.ts";
-export type { CompressOptions } from "./src/middleware/compress.ts";
-
-// Generated route types
-export { dirParams, generateTypes } from "./src/types-gen.ts";
-export type { GenResult } from "./src/types-gen.ts";
+// Param types (root: the params face of the matcher)
+export type { Params, ParamValue } from "./src/grammar/matcher.ts";

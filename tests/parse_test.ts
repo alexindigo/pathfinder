@@ -6,7 +6,8 @@
 
 import { assertEquals } from "@std/assert";
 import { Router } from "../src/router.ts";
-import { json, ParseError, parseJson } from "../src/http.ts";
+import { json } from "../src/response.ts";
+import { ParseError, parseJson } from "../src/body.ts";
 
 const quiet = async (fn: () => Promise<void>): Promise<void> => {
   const { error } = console;

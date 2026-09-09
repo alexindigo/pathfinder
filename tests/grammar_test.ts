@@ -5,8 +5,8 @@
 // ruling 2026-08-31) extend the base set.
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import { type Chunk, parsePattern, routeShapeKey } from "../src/grammar.ts";
-import { CompiledMatcher } from "../src/matcher.ts";
+import { type Chunk, parsePattern, routeShapeKey } from "../src/grammar/mod.ts";
+import { CompiledMatcher } from "../src/grammar/mod.ts";
 import grammar2Routes from "./fixtures/routes/grammar2.ts";
 import edgecasesRoutes from "./fixtures/routes/edgecases.ts";
 import adversarialRoutes from "./fixtures/routes/adversarial.ts";

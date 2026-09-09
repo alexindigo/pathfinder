@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// HttpError, ParseError/parseJson, result coercion (the handler return
-// contract), and the allowedMethods helper.
+// Engine-internal HTTP contract: HttpError, result coercion (the handler
+// return contract), and the allowedMethods helper. Not public API — the
+// public surface is the root module plus the namespaced subpaths
+// (./response, ./middleware, ./body, ./grammar, ./loader).
 
-import type { PathfinderRequest } from "./router.ts";
+import { text } from "./response.ts";
 
 /** Thrown by handlers/middleware to short-circuit to a status + `{"detail"}`
  * JSON body (globnotes/FastAPI shape). Optional headers ride along (e.g.
@@ -29,84 +31,6 @@ export class ContractViolation extends Error {
     super(message);
     this.name = "ContractViolation";
   }
-}
-
-/** Thrown by {@linkcode parseJson} when the request body is not valid JSON —
- * a distinct, catchable type so a handler can map a client fault to its own
- * shaped response. The framework default stays: uncaught parse errors map
- * to the 500 outcome by design (see docs/error-shapes.md). */
-export class ParseError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "ParseError";
-  }
-}
-
-/** Endpoint-side parse convenience: `request.body.json()` with
- * `SyntaxError` wrapped into {@linkcode ParseError}. Other errors (guard
- * violations, body limits) pass through untouched.
- *
- * ```ts
- * import { json, parseJson, ParseError } from "@pathfinder/pathfinder";
- * export default async (request) => {
- *   try {
- *     // `await` matters: a bare `return parseJson(request)` would skip
- *     // the catch (the promise rejection never enters the try block).
- *     return await parseJson(request);
- *   } catch (error) {
- *     if (error instanceof ParseError) {
- *       return json({ errcode: "M_NOT_JSON", error: "Content not JSON." }, {
- *         status: 400,
- *       });
- *     }
- *     throw error;
- *   }
- * };
- * ```
- */
-export async function parseJson(request: PathfinderRequest): Promise<unknown> {
-  try {
-    return await request.body.json();
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new ParseError("request body is not valid JSON", { cause: error });
-    }
-    throw error;
-  }
-}
-
-/** Response factories — package-level helpers, never context methods. */
-
-/** JSON response; auto Content-Length via the platform. */
-export function json(value: unknown, init?: ResponseInit): Response {
-  return Response.json(value, init);
-}
-
-/** HTML response (platform default would be text/plain). */
-export function html(body: string, init?: ResponseInit): Response {
-  const headers = new Headers(init?.headers);
-  if (!headers.has("content-type")) {
-    headers.set("content-type", "text/html; charset=utf-8");
-  }
-  return new Response(body, { ...init, headers });
-}
-
-/** Plain-text response. */
-export function text(body: string, init?: ResponseInit): Response {
-  const headers = new Headers(init?.headers);
-  if (!headers.has("content-type")) {
-    headers.set("content-type", "text/plain;charset=UTF-8");
-  }
-  return new Response(body, { ...init, headers });
-}
-
-/** Redirect — accepts relative URLs (platform `Response.redirect` rejects
- * them). Defaults to 302 like the platform. */
-export function redirect(location: string, status = 302): Response {
-  return new Response(null, {
-    status,
-    headers: { location },
-  });
 }
 
 /** `Allow` header value from a set of methods (uppercase, sorted). */

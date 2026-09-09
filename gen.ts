@@ -8,8 +8,8 @@
 //   deno task gen -- index src/layer0                 (tree index)
 //   deno run --allow-read gen.ts index --check src/layer0   (drift gate)
 
-import { generateTypes } from "./src/types-gen.ts";
-import { generateIndex } from "./src/index-gen.ts";
+import { generateTypes } from "./src/loader/types-gen.ts";
+import { generateIndex } from "./src/loader/index-gen.ts";
 
 const args = Deno.args.filter((a) => a !== "--" && a.trim() !== "");
 

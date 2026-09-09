@@ -16,7 +16,7 @@ A thrown `HttpError` always renders `{"detail": …}`. When your API needs a
 shaped body, return the response yourself:
 
 ```ts
-import { json } from "@pathfinder/pathfinder";
+import { json } from "@pathfinder/pathfinder/response";
 
 export default () =>
   json({ errcode: "M_UNKNOWN", error: "Not found." }, {
@@ -35,7 +35,8 @@ uncaught error to `500` — the framework does not know that a `SyntaxError` fro
 a one-line catch:
 
 ```ts
-import { json, ParseError, parseJson } from "@pathfinder/pathfinder";
+import { parseJson, ParseError } from "@pathfinder/pathfinder/body";
+import { json } from "@pathfinder/pathfinder/response";
 
 export default async (request) => {
   try {
@@ -75,7 +76,7 @@ endpoints/
 
 ```ts
 // endpoints/404.ts
-import { json } from "@pathfinder/pathfinder";
+import { json } from "@pathfinder/pathfinder/response";
 
 export default (request, context) =>
   json({

@@ -7,14 +7,8 @@
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { Router } from "../src/router.ts";
 import type { Context, PathfinderRequest } from "../src/router.ts";
-import {
-  allowedMethods,
-  html,
-  HttpError,
-  json,
-  redirect,
-  text,
-} from "../src/http.ts";
+import { allowedMethods, HttpError } from "../src/http.ts";
+import { html, json, redirect, text } from "../src/response.ts";
 
 /** Silence the deliberately-loud logs for the duration of fn. */
 async function quiet(fn: () => Promise<void>): Promise<void> {

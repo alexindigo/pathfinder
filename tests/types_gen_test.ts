@@ -3,8 +3,8 @@
 // $types generator tests: matryoshka emission, gen --check drift gate.
 
 import { assertEquals } from "@std/assert";
-import { generateTypes } from "../src/types-gen.ts";
-import { dirParams } from "../src/types-gen.ts";
+import { generateTypes } from "../src/loader/types-gen.ts";
+import { dirParams } from "../src/loader/types-gen.ts";
 
 Deno.test("types-gen: dirname grammar → param types", () => {
   assertEquals(dirParams("#x").get("x"), "string");

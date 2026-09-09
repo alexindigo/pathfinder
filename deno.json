@@ -3,8 +3,13 @@
   "version": "0.1.1",
   "exports": {
     ".": "./mod.ts",
+    "./body": "./src/body.ts",
     "./gen": "./gen.ts",
-    "./layer0": "./src/layer0.ts"
+    "./grammar": "./src/grammar/mod.ts",
+    "./layer0": "./src/layer0.ts",
+    "./loader": "./src/loader/mod.ts",
+    "./middleware": "./src/middleware/mod.ts",
+    "./response": "./src/response.ts"
   },
   "tasks": {
     "test": "deno test --allow-read --allow-net --allow-env --allow-write tests/",

@@ -38,6 +38,8 @@ export {
   html,
   HttpError,
   json,
+  ParseError,
+  parseJson,
   redirect,
   text,
 } from "./src/http.ts";

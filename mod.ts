@@ -40,4 +40,9 @@ export type {
 export { HttpError } from "./src/http.ts";
 
 // Param types (root: the params face of the matcher)
-export type { Params, ParamValue } from "./src/grammar/matcher.ts";
+export type {
+  DispatchDict,
+  FactPayload,
+  Params,
+  ParamValue,
+} from "./src/grammar/matcher.ts";

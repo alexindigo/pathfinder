@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
 import {
+  type Chunk,
+  type DynamicChunk,
   parsePattern,
   routeShapeKey,
   typeRegistry,
@@ -25,33 +27,78 @@ export type Params = Record<string, ParamValue>;
  * handlers have the (request, context) face — see router.ts. */
 export type LeafHandler = (params: Params) => unknown;
 
+/** A fact entry: a recognized non-endpoint file (middleware or outcome page)
+ * compiled into the automaton at its directory's pattern. The payload IS the
+ * loader's registration object (opaque here; the router resolves it) —
+ * facts never accept and never prune route candidates; they annotate the
+ * node at their directory so the walk's dict carries them. */
+export type FactPayload =
+  | { kind: "outcome"; code: number; reg: unknown }
+  | {
+    kind: "middleware";
+    name: string;
+    disableStreaming: boolean;
+    reg: unknown;
+  };
+
 export interface Route {
-  method: string;
+  method?: string;
   pattern: string;
-  handler: LeafHandler;
+  handler?: LeafHandler;
   /** Opaque payload returned by lookup() on a match (framework route entry). */
   data?: unknown;
-  /** Directory tag recorded on the route's leaf node — the miss anchor's
-   * directory for framework miss handling. Absent = untagged. */
-  dir?: string;
+  /** Fact entry: a non-endpoint file (middleware/outcome) compiled at this
+   * pattern. One entry path — constructor and add() take the same shape. */
+  fact?: FactPayload;
 }
 
 export interface Matcher {
   handle(method: string, url: string): unknown;
 }
 
-/** Anchor of a miss: the deepest tagged point the walk reached, with the
- * captures along the anchor path and the unmatched remainder. */
+/** The per-branch dispatch state the walk accumulates: middleware
+ * registrations in accumulation order (walk order = outer→inner; within a
+ * dir, loader name-order), the deepest-seen outcome registration per code,
+ * and the answering-directory identity. Immutable — fact-bearing nodes
+ * clone-and-extend (copy-on-write); branches without facts share the
+ * parent's dict by reference. */
+export interface DispatchDict {
+  /** The answering directory's pattern ("" for the root stand). */
+  readonly dir: string;
+  /** Middleware fact payloads, accumulation order. */
+  readonly chain: readonly FactPayload[];
+  /** Deepest-seen outcome fact per code. */
+  readonly outcomes: ReadonlyMap<number, FactPayload>;
+}
+
+/** Anchor of a miss: the deepest fact-bearing stand the walk stood in — a
+ * walk fact, not a post-walk resolution. `params` are the captures along
+ * the answering folder's path; `rest` is everything below that folder
+ * (leading slash included) — the two compose. A miss with no
+ * folder-with-files anywhere answers at the root stand: params `{}`, rest
+ * = the full path, dict = the root's (vacuum). */
 export interface LookupAnchor {
-  dir: string | null;
+  dict: DispatchDict;
   params: Params;
   rest: string;
 }
 
 export type LookupResult =
-  | { kind: "match"; params: Params; handler: LeafHandler; data: unknown }
-  | { kind: "method-miss"; allowed: string[]; params: Params; data: unknown }
-  | { kind: "no-match"; anchor: LookupAnchor | null };
+  | {
+    kind: "match";
+    params: Params;
+    handler: LeafHandler;
+    data: unknown;
+    dict: DispatchDict;
+  }
+  | {
+    kind: "method-miss";
+    allowed: string[];
+    params: Params;
+    data: unknown;
+    dict: DispatchDict;
+  }
+  | { kind: "no-match"; anchor: LookupAnchor };
 
 interface BoundedEdge {
   name: string;
@@ -85,8 +132,13 @@ interface Node {
   handlers: Map<string, LeafHandler> | null;
   /** Opaque per-method payloads parallel to handlers (framework route data). */
   data: Map<string, unknown> | null;
-  /** Directory tag (route.dir of the last route inserted here). */
-  dir: string | null;
+  /** Fact entries annotating this node (middleware/outcome files at this
+   * directory's pattern). Never endpoint-accepting; the walk's dict extends
+   * here. */
+  facts: FactPayload[] | null;
+  /** The directory pattern the facts were compiled at (the stand's
+   * identity for the dict). Set together with `facts`. */
+  factsDir: string | null;
 }
 
 function newNode(): Node {
@@ -98,8 +150,34 @@ function newNode(): Node {
     crossing: null,
     handlers: null,
     data: null,
-    dir: null,
+    facts: null,
+    factsDir: null,
   };
+}
+
+// --- The dispatch dict (always-dict walk) ------------------------------------
+
+const EMPTY_DICT: DispatchDict = Object.freeze({
+  dir: "",
+  chain: Object.freeze([]),
+  outcomes: new Map<number, FactPayload>(),
+});
+
+/** Copy-on-write extension: a fact-bearing node clones the parent's dict and
+ * extends it. Immutable after construction — dead branches are
+ * garbage-collected with their dicts; no rollback exists anywhere. */
+function extendDict(
+  parent: DispatchDict,
+  facts: FactPayload[],
+  dir: string,
+): DispatchDict {
+  const chain = [...parent.chain];
+  const outcomes = new Map(parent.outcomes);
+  for (const fact of facts) {
+    if (fact.kind === "middleware") chain.push(fact);
+    else outcomes.set(fact.code, fact);
+  }
+  return Object.freeze({ dir, chain: Object.freeze(chain), outcomes });
 }
 
 function setStaticEdge(node: Node, label: string, child: Node): void {
@@ -185,9 +263,28 @@ export class CompiledMatcher implements Matcher {
     for (const r of routes) this.add(r);
   }
 
-  /** Incremental insertion; same duplicate detection as construction. */
+  /** Incremental insertion; same duplicate detection as construction.
+   * One entry path for endpoints and facts alike ("all discovered items
+   * join the routes list"): a route carrying `fact` compiles as a
+   * non-accepting annotation at its pattern; kind-qualified shape keys keep
+   * facts from colliding with endpoints or with each other. */
   add(route: Route): void {
-    const key = route.method + ":" +
+    if (route.fact !== undefined) {
+      const shape = routeShapeKey(route.pattern, this.registry);
+      const key = route.fact.kind === "outcome"
+        ? `fact:outcome:${route.fact.code}:${shape}`
+        : `fact:middleware:${route.fact.name}:${shape}`;
+      const prev = this.seen.get(key);
+      if (prev !== undefined) {
+        throw new Error(
+          `Duplicate fact entry: ${route.pattern} (${key}) vs ${prev}`,
+        );
+      }
+      this.seen.set(key, route.pattern);
+      this.insertFact(route);
+      return;
+    }
+    const key = (route.method ?? "") + ":" +
       routeShapeKey(route.pattern, this.registry);
     const prev = this.seen.get(key);
     if (prev !== undefined) {
@@ -197,12 +294,90 @@ export class CompiledMatcher implements Matcher {
     this.insert(route);
   }
 
+  /** Fact insertion: walk the dir pattern to its node (never creating
+   * handlers) and annotate. A dynamic chunk in the fact's path unifies the
+   * bounded `(name,type)` group at that node — anchored siblings merge into
+   * one `anchor = null` edge with their anchors demoted to static edges on
+   * the shared child — so every branch passing the directory traverses the
+   * fact (hole 1). Insertion-order independent: a later `add()` route
+   * joining a unified group demotes its own anchor the same way. */
+  private insertFact(route: Route): void {
+    const fact = route.fact!;
+    let node = this.root;
+    const chunks = parsePattern(route.pattern, this.registry);
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci];
+      if (chunk.kind === "static") {
+        node = insertStatic(node, chunk.text);
+      } else if (chunk.crossing) {
+        if (node.crossing === null) {
+          node.crossing = { name: chunk.name, child: newNode() };
+        }
+        node = node.crossing.child;
+      } else {
+        const validate = chunk.type === "string"
+          ? null
+          : this.registry[chunk.type].validate;
+        node = this.descendBounded(node, chunk, validate);
+      }
+    }
+    if (node.facts === null) node.facts = [];
+    node.facts.push(fact);
+    if (node.factsDir === null) node.factsDir = route.pattern;
+  }
+
+  /** Descend a bounded dynamic chunk, unifying the `(name, type)` group:
+   * one `anchor = null` edge per group; slash-anchored siblings keep their
+   * behavior via a demoted static edge (the anchor text) on the shared
+   * child. An anchored guard ≡ capture-then-fail-child under the existing
+   * grammar-choice stack, so accept/reject is preserved. Mid-segment
+   * (compound) anchors are not demoted — they keep their own edges and
+   * bypass the fact (recorded granularity limitation). */
+  private descendBounded(
+    node: Node,
+    chunk: DynamicChunk,
+    validate: ((value: string) => boolean) | null,
+  ): Node {
+    let unified = node.bounded.find((b) =>
+      b.name === chunk.name && b.type === chunk.type && b.anchor === null
+    );
+    if (unified === undefined) {
+      unified = {
+        name: chunk.name,
+        type: chunk.type,
+        anchor: null,
+        validate,
+        child: newNode(),
+      };
+      addBounded(node, unified);
+    }
+    // Demote slash-anchored siblings into static edges on the shared child.
+    // The sibling's continuation already begins with its anchor text (the
+    // route's next static chunk), so its end node attaches under the same
+    // label on the shared child.
+    for (const sib of [...node.bounded]) {
+      if (
+        sib === unified || sib.name !== chunk.name || sib.type !== chunk.type ||
+        sib.anchor === null || !sib.anchor.startsWith("/")
+      ) continue;
+      const target = insertStatic(sib.child, sib.anchor);
+      setStaticEdge(unified.child, sib.anchor, target);
+      node.bounded.splice(node.bounded.indexOf(sib), 1);
+    }
+    return unified.child;
+  }
+
   private insert(route: Route): void {
+    if (route.fact !== undefined || route.method === undefined) {
+      throw new Error(
+        "[pathfinder] internal: fact routes must go through add()",
+      );
+    }
     let node = this.root;
     const chunks = parsePattern(route.pattern, this.registry);
     const bound = new Set<string>();
     for (let ci = 0; ci < chunks.length; ci++) {
-      const chunk = chunks[ci];
+      const chunk = chunks[ci] as Chunk;
       if (chunk.kind === "static") {
         node = insertStatic(node, chunk.text);
       } else {
@@ -229,6 +404,23 @@ export class CompiledMatcher implements Matcher {
           const validate = chunk.type === "string"
             ? null
             : this.registry[chunk.type].validate;
+          // A fact-bearing unified group already shares one capture edge:
+          // the route demotes its own anchor (capture edge → shared child,
+          // anchor as static) and continues past BOTH the consumed chunk
+          // and its anchor static.
+          const unified = node.bounded.find((b) =>
+            b.name === chunk.name && b.type === chunk.type &&
+            b.anchor === null
+          );
+          if (unified !== undefined) {
+            node = unified.child;
+            if (anchor !== null) {
+              node = insertStatic(node, anchor);
+              ci++; // the anchor static chunk was consumed by the demotion
+            }
+            bound.add(chunk.name);
+            continue;
+          }
           let edge = node.bounded.find((b) =>
             b.name === chunk.name && b.type === chunk.type &&
             b.anchor === anchor
@@ -252,12 +444,11 @@ export class CompiledMatcher implements Matcher {
     if (node.handlers.has(route.method)) {
       throw new Error(`Duplicate route: ${route.method} ${route.pattern}`);
     }
-    node.handlers.set(route.method, route.handler);
+    node.handlers.set(route.method, route.handler!);
     if (route.data !== undefined) {
       if (node.data === null) node.data = new Map();
       node.data.set(route.method, route.data);
     }
-    if (route.dir !== undefined) node.dir = route.dir;
   }
 
   handle(method: string, url: string): unknown {
@@ -269,9 +460,10 @@ export class CompiledMatcher implements Matcher {
    * Rich lookup: the same priority-ordered walk as handle(), returning a
    * discriminated result. The first structurally-accepting leaf reached
    * without the request method is recorded as a method-miss candidate (a
-   * lower-priority route may still match); the deepest tagged frame reached
-   * across the whole walk is the miss anchor, with the captures along the
-   * anchor path and the unmatched remainder.
+   * lower-priority route may still match); the miss answer comes from the
+   * deepest fact-bearing stand the walk stood in (hole 3 — the always-dict
+   * rule), with the captures along that folder's path and the unmatched
+   * remainder below it.
    */
   lookup(method: string, url: string): LookupResult {
     // Slashes are ordinary payload bytes inside a crossing capture — no
@@ -300,8 +492,13 @@ export class CompiledMatcher implements Matcher {
       allowed: string[];
       data: unknown;
       captures: Capture[];
+      dict: DispatchDict;
     };
-    type AnchorCandidate = { dir: string; pos: number; captures: Capture[] };
+    type AnchorCandidate = {
+      pos: number;
+      captures: Capture[];
+      dict: DispatchDict;
+    };
     // Holder objects — TS narrowing can't see the closure assignments.
     const missRef: { value: MissCandidate | null } = { value: null };
     const anchorRef: { value: AnchorCandidate | null } = { value: null };
@@ -314,13 +511,30 @@ export class CompiledMatcher implements Matcher {
       cands: number[] | null;
       candsIdx: number;
       capBase: number;
+      dict: DispatchDict;
     }[] = [];
     const pushFrame = (node: Node, pos: number, capBase = captures.length) => {
+      // The dict accumulates along the branch: a fact-bearing node clones
+      // and extends the parent's (copy-on-write); factless frames share it
+      // by reference. No undo — pop drops the ref with the frame.
+      const parentDict = stack.length === 0
+        ? EMPTY_DICT
+        : stack[stack.length - 1].dict;
+      const dict = node.facts === null
+        ? parentDict
+        : extendDict(parentDict, node.facts, node.factsDir ?? "");
+      // Anchor tracking: only fact-bearing stands anchor (hole 3 — the miss
+      // answer is the deepest folder-with-files the walk stood in, NOT the
+      // deepest point ever touched). Walk priority order breaks equal-pos
+      // ties (static before typed bounded before untyped bounded before
+      // crossing); strictly-greater keeps the first stand at a depth. The
+      // captures snapshot happens only here — bounded by fact density, not
+      // path length.
       if (
-        node.dir !== null &&
+        node.facts !== null &&
         (anchorRef.value === null || anchorRef.value.pos < pos)
       ) {
-        anchorRef.value = { dir: node.dir, pos, captures: captures.slice() };
+        anchorRef.value = { pos, captures: captures.slice(), dict };
       }
       stack.push({
         node,
@@ -330,14 +544,16 @@ export class CompiledMatcher implements Matcher {
         cands: null,
         candsIdx: 0,
         capBase,
+        dict,
       });
     };
-    const recordMiss = (node: Node) => {
+    const recordMiss = (node: Node, dict: DispatchDict) => {
       if (missRef.value !== null || node.handlers === null) return;
       missRef.value = {
         allowed: [...node.handlers.keys()],
         data: node.data === null ? undefined : node.data.values().next().value,
         captures: captures.slice(),
+        dict,
       };
     };
     pushFrame(this.root, 0);
@@ -357,9 +573,10 @@ export class CompiledMatcher implements Matcher {
               params: toParams(captures),
               handler,
               data: f.node.data?.get(method),
+              dict: f.dict,
             };
           }
-          if (f.node.handlers !== null) recordMiss(f.node);
+          if (f.node.handlers !== null) recordMiss(f.node, f.dict);
           if (atEnd) {
             captures.length = f.capBase;
             stack.pop();
@@ -447,7 +664,12 @@ export class CompiledMatcher implements Matcher {
       }
       if (f.cands === null) {
         const set = new Set<number>();
-        if (cross.child.handlers !== null) set.add(path.length);
+        // Hole 2: a folder holding any recognized file is always a stopping point
+        // — its facts seed the "take everything" candidate (honor, never
+        // flag). Nothing else about the derivation changes.
+        if (cross.child.handlers !== null || cross.child.facts !== null) {
+          set.add(path.length);
+        }
         for (const [label] of cross.child.statics) {
           let from = f.pos + 1; // capture must be non-empty
           for (;;) {
@@ -478,13 +700,26 @@ export class CompiledMatcher implements Matcher {
         allowed: missRef.value.allowed,
         params: toParams(missRef.value.captures),
         data: missRef.value.data,
+        dict: missRef.value.dict,
       };
     }
-    const anchor = anchorRef.value;
+    // Miss answer: the deepest fact-bearing stand the walk stood in (hole
+    // 3) — its dict is the dispatch state; params/rest are measured from
+    // that folder. No folder-with-files anywhere → the root stand with the
+    // root's dict (vacuum: params {}, rest = the full path).
+    // Miss answer: the deepest fact-bearing stand the walk stood in (hole
+    // 3) — its dict is the dispatch state; params/rest are measured from
+    // that folder. No folder-with-files anywhere → the root stand with the
+    // root's dict (vacuum: params {}, rest = the full path).
+    const anchor = anchorRef.value ?? {
+      pos: 0,
+      captures: [],
+      dict: EMPTY_DICT,
+    };
     return {
       kind: "no-match",
-      anchor: anchor === null ? null : {
-        dir: anchor.dir,
+      anchor: {
+        dict: anchor.dict,
         params: toParams(anchor.captures),
         rest: path.slice(anchor.pos),
       },

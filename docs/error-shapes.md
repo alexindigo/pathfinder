@@ -65,6 +65,18 @@ through untouched. Repeated per endpoint? Put it in a helper, or mount a
 `disableStreaming` middleware in that subtree that maps the throw for its
 routes.
 
+Body access is a property of the dispatched directory — a `disableStreaming`
+middleware's body access applies to misses in its directory too (misses run the
+same middleware chain). A middleware meant to skip misses does so explicitly —
+the idiom is intentional, not a workaround:
+
+```ts
+export default (request, context) => {
+  if (context.miss !== undefined) return; // miss — nothing to sniff
+  // ... body-reading logic for matched routes
+};
+```
+
 ## Return, don't throw, for computed responses
 
 `HttpError` covers the error paths. For ordinary responses whose body is the

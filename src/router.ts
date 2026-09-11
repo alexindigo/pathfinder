@@ -8,7 +8,12 @@
 import { coerceResult, ContractViolation, HttpError } from "./http.ts";
 import { BodyLimitError, limitTransform } from "./body_limit.ts";
 import type { ManifestRow } from "./loader/mod.ts";
-import type { LookupResult, Params } from "./grammar/matcher.ts";
+import type {
+  DispatchDict,
+  FactPayload,
+  LookupResult,
+  Params,
+} from "./grammar/matcher.ts";
 import { CompiledMatcher } from "./grammar/matcher.ts";
 import type { TypeSpec } from "./grammar/pattern.ts";
 
@@ -737,8 +742,6 @@ export class Router {
     string,
     { middleware: Middleware; disableStreaming: boolean }[]
   >();
-  // outcome code → dir → renderer
-  #outcomes = new Map<number, Map<string, Handler>>();
   #app: object;
   #manifest: () => readonly ManifestRow[];
 
@@ -752,6 +755,14 @@ export class Router {
     this.#app = app;
     this.#manifest = opts?.manifest ?? (() => []);
     this.#matcher = new CompiledMatcher([], { types: opts?.types });
+  }
+
+  /** Engine path for fact entries (middleware/outcome files compiled at
+   * their directory's pattern). The loader calls this; `Router.add` stays
+   * endpoint-only and programmatic middleware goes through
+   * `setDirMiddleware`. */
+  addFact(pattern: string, fact: FactPayload): void {
+    this.#matcher.add({ pattern, fact });
   }
 
   add(
@@ -782,7 +793,6 @@ export class Router {
       pattern,
       handler: () => null, // leaf placeholder — dispatch goes through lookup()
       data: entry,
-      dir,
     });
   }
 
@@ -817,30 +827,27 @@ export class Router {
     return false;
   }
 
+  /** Register an outcome renderer for a directory. Same contract as shipped;
+   * the renderer compiles as an automaton fact at the dir pattern — the
+   * walk's dict carries it, and the deepest-seen fact per code IS the
+   * cascade (no post-walk resolution). */
   setOutcome(code: number, dir: string, handler: Handler): void {
-    let byDir = this.#outcomes.get(code);
-    if (byDir === undefined) {
-      byDir = new Map();
-      this.#outcomes.set(code, byDir);
-    }
-    byDir.set(dir, handler);
+    this.addFact(dir, { kind: "outcome", code, reg: { code, dir, handler } });
   }
 
   lookup(method: string, path: string): LookupResult {
     return this.#matcher.lookup(method, path);
   }
 
-  #resolveOutcome(code: number, dir: string): Handler | null {
-    const byDir = this.#outcomes.get(code);
-    if (byDir === undefined) return null;
-    let d = dir;
-    for (;;) {
-      const found = byDir.get(d);
-      if (found !== undefined) return found; // nearest ancestor cascade
-      if (d === "") return null;
-      const cut = d.lastIndexOf("/");
-      d = cut <= 0 ? "" : d.slice(0, cut);
-    }
+  /** Outcome resolution: the dict's deepest-seen registration for the code
+   * — the cascade is the walk's own accumulation (nearest ancestor by
+   * construction). Vacuum: no page anywhere on the branch → null (bare
+   * status fallback at the call sites). */
+  #resolveOutcome(code: number, dict: DispatchDict): Handler | null {
+    const fact = dict.outcomes.get(code);
+    if (fact === undefined || fact.kind !== "outcome") return null;
+    const reg = fact.reg as { handler?: Handler };
+    return reg?.handler ?? null;
   }
 
   /** Middleware chain for a directory: every registered dir that is a prefix
@@ -864,9 +871,6 @@ export class Router {
 
     if (result.kind === "match") {
       const entry = result.data as RouteEntry;
-      if (entry.disableStreaming || this.#dirStreaming(entry.dir)) {
-        body.allowMiddlewareAccess();
-      }
       const limit = (entry.meta as { bodyLimit?: unknown }).bodyLimit;
       if (typeof limit === "number") body.setLimit(limit);
       const view = buildRequestView(
@@ -890,6 +894,8 @@ export class Router {
         entry.chain ?? this.chainFor(entry.dir),
         entry.handler,
         entry.dir,
+        result.dict,
+        entry.disableStreaming,
       );
     }
 
@@ -905,7 +911,9 @@ export class Router {
         params: result.params,
         allowed: result.allowed,
       };
-      const renderer = this.#resolveOutcome(code, anchorDir);
+      // Hole 3: the wrong-method branch pockets its dict — the branch that
+      // found the page answers, middleware chain first, handler second.
+      const renderer = this.#resolveOutcome(code, result.dict);
       const handler: Handler = renderer ??
         (() => new Response(null, { status: code })); // vacuum = bare status
       return await this.#dispatch(
@@ -916,18 +924,21 @@ export class Router {
         this.chainFor(anchorDir),
         handler,
         anchorDir,
+        result.dict,
+        false,
       );
     }
 
-    // no-match
+    // no-match — the anchor is the deepest fact-bearing stand the walk
+    // stood in; its dict IS the dispatch state (chain, cascade, miss data).
     const anchor = result.anchor;
-    const anchorDir = anchor?.dir ?? "";
+    const anchorDir = anchor.dict.dir;
     context.miss = {
       kind: "no-match",
-      params: anchor?.params ?? {},
-      rest: anchor?.rest ?? path,
+      params: anchor.params,
+      rest: anchor.rest,
     };
-    const renderer = this.#resolveOutcome(404, anchorDir);
+    const renderer = this.#resolveOutcome(404, anchor.dict);
     const handler: Handler = renderer ??
       (() => new Response(null, { status: 404 })); // vacuum = bare status
     return await this.#dispatch(
@@ -938,6 +949,8 @@ export class Router {
       this.chainFor(anchorDir),
       handler,
       anchorDir,
+      anchor.dict,
+      false,
     );
   }
 
@@ -951,10 +964,20 @@ export class Router {
     chain: Middleware[],
     handler: Handler,
     anchorDir: string,
+    dict: DispatchDict,
+    entryDisableStreaming: boolean,
   ): Promise<Response> {
     const postFns: PostFn[] = [];
     let response: Response | null = null;
     body.setPhase("middleware");
+    // Body access is a property of the DISPATCHED DIRECTORY, computed once
+    // here from the chain about to run — not mirrored per dispatch branch.
+    // The miss-chain rule runs the same directory chain on misses, so a
+    // body-reading middleware has the same access on misses it has on
+    // matches.
+    if (entryDisableStreaming || this.#dirStreaming(anchorDir)) {
+      body.allowMiddlewareAccess();
+    }
 
     try {
       let rawUsed = request._raw.bodyUsed;
@@ -1000,9 +1023,14 @@ export class Router {
     } catch (error) {
       if (upgrade.declared && !upgrade.settled) upgrade.reject(error);
       if (error instanceof HttpError) {
-        // Renders directly — cascades are for framework-generated outcomes.
+        // The branch's dict resolves the status first (the promise covers
+        // endpoint-produced codes: the closest outcome page renders when
+        // the app shipped one); without a page the body renders verbatim.
+        const page = this.#resolveOutcome(error.status, dict);
         try {
-          response = renderHttpError(error);
+          response = page === null
+            ? renderHttpError(error)
+            : coerceResult(await page(request, context));
         } catch (coerceError) {
           // A body the return contract can't represent is a programming
           // error — loud 500, never a silent fallback.
@@ -1013,7 +1041,7 @@ export class Router {
           context.error = coerceError;
           response = await this.#renderOutcome(
             500,
-            anchorDir,
+            dict,
             request,
             context,
           );
@@ -1021,12 +1049,12 @@ export class Router {
       } else if (error instanceof BodyLimitError) {
         // 413 outcome (map grows additively; subtree 413.ts customizes).
         context.error = error;
-        response = await this.#renderOutcome(413, anchorDir, request, context);
+        response = await this.#renderOutcome(413, dict, request, context);
       } else {
         // 500 outcome → 500 renderer cascade; vacuum = bare status. Loud.
         console.error("[pathfinder] 500:", error);
         context.error = error;
-        response = await this.#renderOutcome(500, anchorDir, request, context);
+        response = await this.#renderOutcome(500, dict, request, context);
       }
     }
 
@@ -1066,11 +1094,11 @@ export class Router {
 
   async #renderOutcome(
     code: number,
-    anchorDir: string,
+    dict: DispatchDict,
     request: PathfinderRequest,
     context: Context,
   ): Promise<Response> {
-    const renderer = this.#resolveOutcome(code, anchorDir);
+    const renderer = this.#resolveOutcome(code, dict);
     if (renderer === null) return new Response(null, { status: code });
     try {
       return coerceResult(await renderer(request, context));

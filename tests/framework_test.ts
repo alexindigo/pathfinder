@@ -6,7 +6,7 @@
 
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { Router } from "../src/router.ts";
-import type { Context, PathfinderRequest } from "../src/router.ts";
+import type { Context, Middleware, PathfinderRequest } from "../src/router.ts";
 import { allowedMethods, HttpError } from "../src/http.ts";
 import { html, json, redirect, text } from "../src/response.ts";
 
@@ -799,6 +799,188 @@ Deno.test("misses: explicit OPTIONS route wins by grammar", async () => {
   assertEquals(await res.text(), "explicit");
 });
 
+Deno.test("misses: leafless outcome dir anchors — the _matrix case", async () => {
+  await quiet(async () => {
+    // A directory holding only a 404.ts (no method files at its level) with
+    // routes deeper inside: a no-match under it must fire THAT dir's
+    // outcome, not fall to the root/Layer-0 default. (Router-direct: the
+    // dir registers via setOutcome; loader walks register it via dirs.)
+    const router = makeRouter();
+    router.add("GET", "/_matrix/client/v3/login", () => "ok");
+    router.add("GET", "/_matrix/client/v3/register", () => "ok");
+    router.setOutcome(404, "/_matrix", (_request, context) => {
+      const miss = context.miss!;
+      if (miss.kind !== "no-match") throw new Error("wrong miss kind");
+      return json({
+        where: "_matrix/404.ts",
+        params: miss.params,
+        rest: miss.rest,
+      }, { status: 404 });
+    });
+    const res = await dispatch(router, GET("/_matrix/client/v3/nope"));
+    assertEquals(await res.json(), {
+      where: "_matrix/404.ts",
+      params: {},
+      rest: "/client/v3/nope", // measured from the answering folder (/_matrix)
+    });
+    // A miss one level deeper anchors deeper but still cascades up to the
+    // leafless dir's outcome.
+    const deep = await dispatch(router, GET("/_matrix/client/v3/login/x"));
+    assertEquals(deep.status, 404);
+    // The root-shadow workaround keeps working: a root outcome catches
+    // misses outside the anchored dirs (higher layer wins at key code␀"").
+    router.setOutcome(
+      404,
+      "",
+      () => new Response("root-shadow", { status: 404 }),
+    );
+    const outside = await dispatch(router, GET("/elsewhere"));
+    assertEquals(await outside.text(), "root-shadow");
+  });
+});
+
+Deno.test("misses: the anchor is the deepest fact-bearing stand", () => {
+  const router = makeRouter();
+  router.add("GET", "/api/v1/rooms/#roomId/messages", () => "m");
+  router.setOutcome(404, "/api/v1/rooms/#roomId", () => "page");
+  // A no-match that dies below the outcome dir: the anchor is the folder
+  // the walk stood in — params are the captures along the folder's path,
+  // rest is everything below it (leading slash included); the dict is the
+  // dispatch state.
+  const miss = router.lookup("GET", "/api/v1/rooms/x/messagesNOPE");
+  if (miss.kind !== "no-match") throw new Error("wrong miss kind");
+  assertEquals(miss.anchor.params, { roomId: "x" });
+  assertEquals(miss.anchor.rest, "/messagesNOPE");
+  assertEquals(miss.anchor.dict.dir, "/api/v1/rooms/#roomId");
+  assertEquals(miss.anchor.dict.outcomes.get(404)?.kind, "outcome");
+  // Nothing matched anywhere (no facts on the branch): the root stand —
+  // params {}, rest = the full path, dict without pages (vacuum).
+  const bare = router.lookup("GET", "/zebra");
+  if (bare.kind !== "no-match") throw new Error("wrong miss kind");
+  assertEquals(bare.anchor.params, {});
+  assertEquals(bare.anchor.rest, "/zebra");
+  assertEquals(bare.anchor.dict.outcomes.size, 0);
+});
+
+Deno.test("misses: body access on miss dispatches — 404 and 405, not 500", async () => {
+  await quiet(async () => {
+    // The wire symptom from communico's spike: a body-reading middleware
+    // (JSON-sniffing error mapper) in the dispatched directory throws
+    // "middleware cannot consume the body" on a miss — 500 instead of
+    // 404/405. Body access is a property of the dispatched directory.
+    const router = makeRouter();
+    function jsonSniffer(): Middleware {
+      return async (request) => {
+        try {
+          await request.body.json();
+        } catch {
+          // not JSON — the sniffer doesn't care
+        }
+      };
+    }
+    const sniffer = jsonSniffer();
+    router.setDirMiddleware("", [{
+      middleware: sniffer,
+      disableStreaming: true,
+    }]);
+    router.add("GET", "/devices", () => "list");
+    const post = (path: string) =>
+      new Request("http://localhost" + path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ a: 1 }),
+      });
+    const notFound = await dispatch(router, post("/devices/x"));
+    assertEquals(notFound.status, 404, "404, not 500");
+    const methodMiss = await dispatch(router, post("/devices"));
+    assertEquals(methodMiss.status, 405, "405, not 500");
+    // A GET-only route with no POST body variant: the same middleware also
+    // rides GET dispatches — json() on an empty body is the middleware's
+    // problem, not the framework's; the sniffer catches it.
+    const match = await dispatch(router, GET("/devices"));
+    assertEquals(match.status, 200);
+  });
+});
+
+Deno.test("misses: body-access parity — same middleware on match and misses", async () => {
+  await quiet(async () => {
+    const seen: string[] = [];
+    function bodyReader(): Middleware {
+      return async (request) => {
+        const value = await request.body.json();
+        seen.push(`read:${(value as { op: string }).op}`);
+      };
+    }
+    const reader = bodyReader();
+    const router = makeRouter();
+    // Explicit middleware joins the miss chain up to the answering folder:
+    // the outcome page fact at /api anchors misses inside /api (file
+    // middleware is the production path — dict facts — covered by the
+    // cascade matrix; this pins the explicit-merge side).
+    router.setOutcome(
+      404,
+      "/api",
+      () => new Response("api-404", { status: 404 }),
+    );
+    router.setDirMiddleware("/api", [{
+      middleware: reader,
+      disableStreaming: true,
+    }]);
+    router.add("POST", "/api/create", () => "created");
+    router.add("GET", "/api/list", () => "list");
+    const base = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    };
+    const match = await dispatch(
+      router,
+      new Request("http://localhost/api/create", {
+        ...base,
+        body: JSON.stringify({ op: "match" }),
+      }),
+    );
+    assertEquals(match.status, 200);
+    const notFound = await dispatch(
+      router,
+      new Request("http://localhost/api/nope", {
+        ...base,
+        body: JSON.stringify({ op: "miss-404" }),
+      }),
+    );
+    assertEquals(notFound.status, 404);
+    const methodMiss = await dispatch(
+      router,
+      new Request("http://localhost/api/list", {
+        ...base,
+        body: JSON.stringify({ op: "miss-405" }),
+      }),
+    );
+    assertEquals(methodMiss.status, 405);
+    // All three dispatches ran the same middleware with body access.
+    assertEquals(seen, ["read:match", "read:miss-404", "read:miss-405"]);
+  });
+});
+
+Deno.test("misses: the miss-skip idiom — middleware skips misses intentionally", async () => {
+  const seen: string[] = [];
+  function skipMisses(): Middleware {
+    return (request, context) => {
+      // The documented idiom: misses don't need their bodies parsed.
+      if (context.miss !== undefined) return;
+      seen.push(`ran:${request.method}`);
+    };
+  }
+  const skipping = skipMisses();
+  const router = makeRouter();
+  router.setDirMiddleware("", [{ middleware: skipping }]);
+  router.add("GET", "/x", () => "ok");
+  await dispatch(router, GET("/x"));
+  assertEquals(seen, ["ran:GET"]);
+  seen.length = 0;
+  await dispatch(router, GET("/nope"));
+  assertEquals(seen, [], "middleware skipped the miss");
+});
+
 Deno.test("misses: 404 fidelity — anchor captures + rest, cascade anchor", async () => {
   await quiet(async () => {
     const router = makeRouter();
@@ -812,7 +994,10 @@ Deno.test("misses: 404 fidelity — anchor captures + rest, cascade anchor", asy
     // "/messages" and dies at "NOPE" — anchor = the route's own directory
     // (deepest matched point), rest = the unmatched remainder.
     const res = await dispatch(router, GET("/api/v1/rooms/x/messagesNOPE"));
-    assertEquals(await res.json(), { params: { roomId: "x" }, rest: "NOPE" });
+    assertEquals(await res.json(), {
+      params: { roomId: "x" },
+      rest: "/messagesNOPE",
+    });
     // Miss outside any dynamic: vacuum bare 404.
     const bare = await dispatch(router, GET("/other"));
     assertEquals(bare.status, 404);

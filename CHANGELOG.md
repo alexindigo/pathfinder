@@ -38,8 +38,8 @@ _our_ choice; consumers write their own shape explicitly).
   compress) (`478d3e1`)
 - http: ParseError + parseJson convenience (`3774af6`)
 - docs: coming-from-hono, dev notes, error-shapes teaching doc (`9231d20`)
-- namespace: re-group the public surface into subpaths (`208056a`)
-- http: payload-agnostic HttpError — the body is the payload (`1f4a7d6`)
+- namespace: re-group the public surface into subpaths (`293f8cc`)
+- http: payload-agnostic HttpError — the body is the payload (`717d832`)
 
 ## 2026-09-01
 

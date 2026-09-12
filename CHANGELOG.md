@@ -4,42 +4,41 @@
 
 ### Breaking
 
-`context.miss.rest` is now measured from the answering folder — everything
-below the directory that answered the miss, leading slash included (a request
-for `/api/v1/rooms/x/messagesNOPE` answered at `rooms/#roomId` now reports
+`context.miss.rest` is now measured from the answering folder — everything below
+the directory that answered the miss, leading slash included (a request for
+`/api/v1/rooms/x/messagesNOPE` answered at `rooms/#roomId` now reports
 `/messagesNOPE`, not the old deepest-walked fragment) — and `params` are the
-captures along that folder's path, so the two compose. Miss handlers and
-outcome pages that consume `context.miss.rest` need updating. Nothing else in
-the public surface changed.
+captures along that folder's path, so the two compose. Miss handlers and outcome
+pages that consume `context.miss.rest` need updating. Nothing else in the public
+surface changed.
 
 - matcher: fact entries + always-dict walk (`bd6b2c6`)
 - router: dispatch from the merged dict chain (`e708b22`)
 
 ### Fix
 
-communico's two M1 findings land in final form: no-match anchors tag
-directories — a leafless directory holding only outcome/middleware files (e.g.
+communico's two M1 findings land in final form: no-match anchors tag directories
+— a leafless directory holding only outcome/middleware files (e.g.
 `_matrix/404.ts`) anchors misses — and miss dispatches honor directory
-middleware body access. Both are pinned at wire level by the integration
-matrix.
+middleware body access. Both are pinned at wire level by the integration matrix.
 
 - router: dispatch from the merged dict chain (`e708b22`)
 - tests: cascade integration matrix (`06b08cc`)
 
 ### Feature
 
-The dispatch state now comes from the walk itself: middleware and outcome
-files compile into the same automaton as routes (fact entries), and every
-branch carries its dict — the middleware chain to run and the closest outcome
-page per status code. Directory middleware runs on every outcome — hits,
-misses, and wrong-methods alike; a miss is answered by the deepest
-folder-with-files the walk stood in (ties: exact over dynamic over catch-all);
-an endpoint's `HttpError(status)` renders the branch's own page for that
-status when one exists (verbatim body stays the no-page fallback); a catch-all
-directory holding only fact files is always a reachable stopping point, so its
-page fires. The post-walk directory scan is gone, and the bench proves it:
-fileless-miss baselines held (~55.6k ops/s direct, the tactical slice
-regression gone). SEMANTICS.md §6 is the normative spec.
+The dispatch state now comes from the walk itself: middleware and outcome files
+compile into the same automaton as routes (fact entries), and every branch
+carries its dict — the middleware chain to run and the closest outcome page per
+status code. Directory middleware runs on every outcome — hits, misses, and
+wrong-methods alike; a miss is answered by the deepest folder-with-files the
+walk stood in (ties: exact over dynamic over catch-all); an endpoint's
+`HttpError(status)` renders the branch's own page for that status when one
+exists (verbatim body stays the no-page fallback); a catch-all directory holding
+only fact files is always a reachable stopping point, so its page fires. The
+post-walk directory scan is gone, and the bench proves it: fileless-miss
+baselines held (~55.6k ops/s direct, the tactical slice regression gone).
+SEMANTICS.md §6 is the normative spec.
 
 - router: dispatch from the merged dict chain (`e708b22`)
 - loader: compile middleware/outcome files as automaton facts (`ace809f`)
@@ -47,17 +46,29 @@ regression gone). SEMANTICS.md §6 is the normative spec.
 - bench: fact-bearing miss scenarios (`c6ef5d4`)
 - docs: SEMANTICS §6 — anchors are walk facts (`183501a`)
 
+### Docs
+
+The JSR documentation pass: module docs with `@module` on all eight entrypoints
+(the generated layer0 index gets it from the `gen index` template) and JSDoc on
+every exported symbol — the JSR census over the entrypoints reports 77 symbols,
+0 undocumented. Plus the release pipeline: a tag-triggered GitHub Actions
+workflow publishes via JSR's native OIDC integration (no secrets; every
+published version carries provenance), gated on tag/version match and the full
+gate set.
+
+- docs: module docs + full symbol docs across entrypoints (`f2f298e`)
+- ci: JSR publish workflow — tag-triggered, OIDC provenance (`3ec8d62`)
+
 ## 2026-09-10
 
 ### Feature
 
 The matcher substrate grows the always-dict walk: middleware/outcome files
-compile as fact entries that never accept and never prune, per-branch dicts
-copy forward with copy-on-write, dynamic groups unify into one shared parent
-where facts sit, catch-all shortlists count folders-with-files as stopping
-points, and the miss anchor is the deepest fact-bearing stand. Serve-level
-perf harness ships alongside (wire + direct modes, scenarios isolating each
-hot path).
+compile as fact entries that never accept and never prune, per-branch dicts copy
+forward with copy-on-write, dynamic groups unify into one shared parent where
+facts sit, catch-all shortlists count folders-with-files as stopping points, and
+the miss anchor is the deepest fact-bearing stand. Serve-level perf harness
+ships alongside (wire + direct modes, scenarios isolating each hot path).
 
 - matcher: fact entries + always-dict walk (`bd6b2c6`)
 - bench: serve-level perf harness (`c2e4922`)

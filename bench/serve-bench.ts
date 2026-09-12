@@ -22,6 +22,9 @@ import type { PathfinderApp } from "../mod.ts";
 
 interface Scenario {
   name: string;
+  /** Which fixture app the scenario rides (plain = the fileless baseline
+   * tree; facts = middleware/outcome files at dynamic and catch-all dirs). */
+  app: "plain" | "facts";
   method: string;
   path: string;
   /** Expected status — asserted on warmup; wrong status fails the run. */
@@ -29,26 +32,64 @@ interface Scenario {
 }
 
 const SCENARIOS: Scenario[] = [
-  { name: "static-match", method: "GET", path: "/health", expect: 200 },
+  {
+    name: "static-match",
+    app: "plain",
+    method: "GET",
+    path: "/health",
+    expect: 200,
+  },
   {
     name: "dynamic-match",
+    app: "plain",
     method: "GET",
     path: "/api/devices/42/settings/7",
     expect: 200,
   },
   {
     name: "deep-no-match",
+    app: "plain",
     method: "GET",
     path: "/api/devices/42/unknown",
     expect: 404,
   },
   {
     name: "method-miss",
+    app: "plain",
     method: "DELETE",
     path: "/api/devices/42",
     expect: 405,
   },
-  { name: "root-no-match", method: "GET", path: "/zebra", expect: 404 },
+  {
+    name: "root-no-match",
+    app: "plain",
+    method: "GET",
+    path: "/zebra",
+    expect: 404,
+  },
+  // Fact-bearing scenarios (always-dict): the plain scenarios above must
+  // hold the fileless baseline; these report what the dict adds.
+  {
+    name: "fact-dir-miss",
+    app: "facts",
+    method: "GET",
+    path: "/rooms/42/unknown",
+    expect: 404,
+  },
+  {
+    name: "fact-method-miss",
+    app: "facts",
+    method: "POST",
+    path: "/rooms/42/messages",
+    expect: 405,
+  },
+  {
+    name: "catch-all-miss",
+    app: "facts",
+    method: "GET",
+    path: "/dl/x",
+    expect: 404,
+  },
 ];
 
 // --- Protocol ----------------------------------------------------------------
@@ -146,25 +187,32 @@ async function bestOf(
 
 // --- Modes -------------------------------------------------------------------
 
-async function wireBench(app: PathfinderApp): Promise<ScenarioResult[]> {
-  const server = Deno.serve({ port: 0 }, app);
-  const port = (server.addr as Deno.NetAddr).port;
+async function wireBench(
+  apps: Record<string, PathfinderApp>,
+): Promise<ScenarioResult[]> {
   const results: ScenarioResult[] = [];
-  try {
-    for (const scenario of SCENARIOS) {
-      const url = `http://localhost:${port}${scenario.path}`;
-      const fire = () => fetch(url, { method: scenario.method });
-      results.push(await bestOf(scenario, "wire", WIRE_REQUESTS, () => fire));
+  for (const appName of ["plain", "facts"]) {
+    const server = Deno.serve({ port: 0 }, apps[appName]);
+    const port = (server.addr as Deno.NetAddr).port;
+    try {
+      for (const scenario of SCENARIOS.filter((s) => s.app === appName)) {
+        const url = `http://localhost:${port}${scenario.path}`;
+        const fire = () => fetch(url, { method: scenario.method });
+        results.push(await bestOf(scenario, "wire", WIRE_REQUESTS, () => fire));
+      }
+    } finally {
+      await server.shutdown();
     }
-  } finally {
-    await server.shutdown();
   }
   return results;
 }
 
-async function directBench(app: PathfinderApp): Promise<ScenarioResult[]> {
+async function directBench(
+  apps: Record<string, PathfinderApp>,
+): Promise<ScenarioResult[]> {
   const results: ScenarioResult[] = [];
   for (const scenario of SCENARIOS) {
+    const app = apps[scenario.app];
     const fire = () =>
       app(
         new Request(`http://bench.local${scenario.path}`, {
@@ -179,18 +227,23 @@ async function directBench(app: PathfinderApp): Promise<ScenarioResult[]> {
 // --- Main --------------------------------------------------------------------
 
 const mode = (Deno.args[0] ?? "both") as "wire" | "direct" | "both";
-const app = await pathfinder({ roots: ["./bench/fixtures/serve/endpoints/"] });
+const apps = {
+  plain: await pathfinder({ roots: ["./bench/fixtures/serve/endpoints/"] }),
+  facts: await pathfinder({
+    roots: ["./bench/fixtures/serve/facts/endpoints/"],
+  }),
+};
 
 const results: ScenarioResult[] = [];
-if (mode === "wire" || mode === "both") results.push(...await wireBench(app));
+if (mode === "wire" || mode === "both") results.push(...await wireBench(apps));
 if (mode === "direct" || mode === "both") {
-  results.push(...await directBench(app));
+  results.push(...await directBench(apps));
 }
 
 // Correctness probe (non-timed): the _matrix leafless-dir 404 must carry the
 // subtree's M_UNRECOGNIZED errcode — the leafless-dir anchoring behavior.
 {
-  const response = await app(
+  const response = await apps.plain(
     new Request("http://bench.local/_matrix/client/v3/nope"),
   );
   const body = await response.json() as { errcode?: string };

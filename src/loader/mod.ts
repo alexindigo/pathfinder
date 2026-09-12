@@ -611,17 +611,33 @@ export async function resolveTree(opts: ResolveOptions): Promise<Loaded> {
     types: opts.types,
     manifest: opts.manifest,
   });
-  for (const [dir, mws] of middlewareByDir(resolver.middleware)) {
-    router.setDirMiddleware(dir, mws);
+  // Facts before routes (the matcher's merge tolerates any order — this is
+  // the no-churn fast path). Each dir's middleware emits name-sorted ("the
+  // digits ARE the config"), so the walk's dict chain order matches the
+  // seat order; outcome pages ride the same dir.
+  const factMiddleware = middlewareByDir(resolver.middleware);
+  for (const [dir, mws] of factMiddleware) {
+    for (const mw of mws) {
+      router.addFact(dir, {
+        kind: "middleware",
+        name: mw.name,
+        disableStreaming: mw.disableStreaming === true,
+        reg: mw,
+      });
+    }
+  }
+  for (const status of resolver.statuses.values()) {
+    router.addFact(status.dir, {
+      kind: "outcome",
+      code: status.code,
+      reg: status,
+    });
   }
   for (const route of resolver.routes.values()) {
     router.add(route.method, route.pattern, route.handler, {
       meta: route.meta,
       dir: route.dir,
     });
-  }
-  for (const status of resolver.statuses.values()) {
-    router.setOutcome(status.code, status.dir, status.handler);
   }
 
   const histogram = new Map<string, number>();

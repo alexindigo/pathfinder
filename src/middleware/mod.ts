@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// Barrel for the shipped optional middleware set.
+/**
+ * The middleware face (`./middleware`): the shipped
+ * optional set — `cors`, `clientIp`, `logger`, `timing`,
+ * `accessLog`, `compress`.
+ *
+ * @module
+ */
 export { cors } from "./cors.ts";
 export type { CorsOptions } from "./cors.ts";
 export { clientIp } from "./client_ip.ts";

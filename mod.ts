@@ -11,6 +11,8 @@
  * `./response` (response factories + ResponseView), `./middleware`
  * (the shipped optional set), `./body` (parse convenience + limits),
  * `./grammar` (pattern grammar + matcher), `./loader` (loader + generators).
+ *
+ * @module
  */
 
 // Factory + loader

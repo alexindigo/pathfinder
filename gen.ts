@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// CLI: emit per-directory `$types.d.ts` files for endpoint roots, and sibling
-// tree indexes (`<dir>.ts`) for packaged trees.
-//
-//   deno task gen -- ./endpoints/                     (types)
-//   deno task gen:check -- ./endpoints/               (CI drift gate)
-//   deno task gen -- index src/layer0                 (tree index)
-//   deno run --allow-read gen.ts index --check src/layer0   (drift gate)
-
+/**
+ * `gen` — code generators for endpoint trees: per-directory
+ * `$types.d.ts` files, and sibling tree indexes (`<dir>.ts`) for packaged
+ * trees (registry installs, Docker images). Drift-gated via `--check`.
+ *
+ *   deno task gen -- ./endpoints/                     (types)
+ *   deno task gen:check -- ./endpoints/               (CI drift gate)
+ *   deno task gen -- index src/layer0                 (tree index)
+ *   deno run --allow-read gen.ts index --check src/layer0   (drift gate)
+ *
+ * @module
+ */
 import { generateTypes } from "./src/loader/types-gen.ts";
 import { generateIndex } from "./src/loader/index-gen.ts";
 

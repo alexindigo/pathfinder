@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// The response face: package-level Response factories and the post-fn
-// response view type. Public subpath `./response`.
-
+/**
+ * The response face (`./response`): response factories
+ * (`json`, `html`, `text`, `redirect`) and the post-fn
+ * `ResponseView` type.
+ *
+ * @module
+ */
 export type { ResponseView } from "./router.ts";
 
 /** JSON response; auto Content-Length via the platform. */

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// The grammar face: the `#` pattern grammar, type registry, and the compiled
-// matcher. Public subpath `./grammar` (hub — spans two source modules).
-
+/**
+ * The grammar face (`./grammar`): the `#` pattern
+ * grammar, the type registry, and the compiled automaton matcher.
+ *
+ * @module
+ */
 export * from "./pattern.ts";
 export * from "./matcher.ts";

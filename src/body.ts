@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// The body face: parse convenience and body-limit constants. Public subpath
-// `./body`.
-
+/**
+ * The body face (`./body`): `parseJson` convenience,
+ * `ParseError`, body-limit constants, and the request-body view.
+ *
+ * @module
+ */
 import type { PathfinderRequest } from "./router.ts";
 
 export { BodyLimitError, GiB, KiB, MiB } from "./body_limit.ts";

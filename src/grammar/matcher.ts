@@ -19,8 +19,10 @@ import {
 // choices (edge selection, crossing take-length) — never over characters
 // within a committed capture.
 
+/** A decoded, coerced capture value — string (untyped), number (num), or bigint (int). */
 export type ParamValue = string | number | bigint;
 
+/** The request's captured params — decoded and typed per the pattern's annotations (honest union default). */
 export type Params = Record<string, ParamValue>;
 
 /** The matcher-level leaf handler (params in, value out). Framework-level
@@ -41,6 +43,7 @@ export type FactPayload =
     reg: unknown;
   };
 
+/** One automaton entry: an endpoint (method + pattern + handler) or a fact — a middleware/outcome file compiled at its directory's pattern. */
 export interface Route {
   method?: string;
   pattern: string;
@@ -52,6 +55,7 @@ export interface Route {
   fact?: FactPayload;
 }
 
+/** The matcher face: `handle` for direct dispatch, `lookup` for the rich discriminated result with the branch's dispatch dict. */
 export interface Matcher {
   handle(method: string, url: string): unknown;
 }
@@ -83,6 +87,7 @@ export interface LookupAnchor {
   rest: string;
 }
 
+/** Rich lookup result: `match` / `method-miss` (both carrying the branch's dispatch dict) or `no-match` (anchored at the deepest fact-bearing stand). */
 export type LookupResult =
   | {
     kind: "match";
@@ -248,6 +253,7 @@ function insertStatic(node: Node, text: string): Node {
   return fresh;
 }
 
+/** The compiled radix automaton: built once from all routes and facts across all roots; walked over the raw request path — O(path length), independent of route count; no backtracking beyond the grammar-choice stack. */
 export class CompiledMatcher implements Matcher {
   private root: Node;
   private seen = new Map<string, string>();

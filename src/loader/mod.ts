@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
-// Filesystem loader & IoC: directory path = pattern,
-// `<method>.ts` = handler file. Filename grammar — the first character
-// decides; NOTHING is reserved:
-//   <letter>[A-Za-z0-9-]*.ts  → method handler (letter-start, no dots)
-//   <digits>-<label>.ts       → middleware, one per file, seat = digits
-//   <digits>.ts               → outcome renderer (closed map v1)
-//   .d.ts                     → ignored (type-only compile-time shadows)
-//   anything else             → build error
-// Directories are 100% URL namespace. No index.ts. Module contract:
-// `export default` = handler (null = tombstone); named exports = meta.
-
+/**
+ * The loader face (`./loader`): filesystem loader & IoC — directory path
+ * = pattern, `<method>.ts` = handler file. Filename grammar — the first
+ * character decides; NOTHING is reserved:
+ *   <letter>[A-Za-z0-9-]*.ts  → method handler (letter-start, no dots)
+ *   <digits>-<label>.ts       → middleware, order = digits
+ *   <digits>.ts               → outcome page, subtree-scoped
+ *   .d.ts                     → ignored (type-only shadow)
+ *   anything else             → build error
+ *
+ * @module
+ */
 import { toFileUrl } from "@std/path";
 import { routeShapeKey, type TypeSpec } from "../grammar/pattern.ts";
 import type { Handler, Meta, Middleware } from "../router.ts";
@@ -23,6 +24,7 @@ const STATUS_FILE = /^[0-9]+\.ts$/;
 /** Closed outcome map v1 — grows additively (413 with body limits). */
 const OUTCOME_CODES = new Set([204, 404, 405, 413, 500]);
 
+/** Effective file table row — kind-tagged (route/middleware/status/ tombstone; tombstones first-class = heartbleed verification), each with file, root, layer, and shadow chain. */
 export interface ManifestRow {
   kind: "route" | "middleware" | "status" | "tombstone";
   layer: number;
@@ -425,12 +427,14 @@ function absolute(path: string): string {
   return path.startsWith("/") ? path : `${Deno.cwd()}/${path}`;
 }
 
+/** The route pattern for a walked directory's relative path. */
 export function patternOf(dirRel: string): string {
   // "api/#roomId/" → "/api/#roomId"; "" → "/"
   if (dirRel === "") return "/";
   return "/" + dirRel.slice(0, -1);
 }
 
+/** The directory's own pattern — the URL-space region of an endpoint dir. */
 export function dirPatternOf(dirRel: string): string {
   // The file's directory as a chain key: "" for root-level files.
   if (dirRel === "") return "";
@@ -472,6 +476,7 @@ export interface IndexRoot {
  * (packaged trees that exist only in the module graph). */
 export type Root = string | URL | IndexRoot;
 
+/** Structural check: is this root a generated tree index (packaged module graph) rather than a filesystem path? */
 export function isIndexRoot(root: Root): root is IndexRoot {
   return typeof root === "object" && !(root instanceof URL) &&
     Array.isArray((root as IndexRoot).entries);
@@ -529,6 +534,7 @@ function indexEntries(root: IndexRoot, layer: number): Entry[] {
 
 // --- Assembly -------------------------------------------------------------------
 
+/** Loader options: the packaged Layer-0 index, Layer-1 app roots, env overlay roots, app data, custom types, and a manifest accessor. */
 export interface ResolveOptions {
   /** Layer 0 — the package's own tree as an index module (index-primary,
    * Amendment 3). */
@@ -546,12 +552,14 @@ export interface ResolveOptions {
   manifest?: () => readonly ManifestRow[];
 }
 
+/** The boot result: the compiled Router, the manifest rows, and the startup summary line. */
 export interface Loaded {
   router: Router;
   manifest: ManifestRow[];
   summary: string;
 }
 
+/** Walk and resolve the endpoint trees into a compiled Router — Layer 0, app roots, env overlays; shadowing and tombstones applied, last wins per file. */
 export async function resolveTree(opts: ResolveOptions): Promise<Loaded> {
   const resolver = new Resolver();
   resolver.registry = opts.types;

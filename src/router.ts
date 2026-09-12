@@ -23,10 +23,13 @@ import type { TypeSpec } from "./grammar/pattern.ts";
 
 // Empty BY DESIGN: augmentation targets. Type aliases can't merge — these
 // must remain interfaces forever (sealed design constraint).
+/** Per-request middleware-writable state (`context.state`). Augment via `declare module "@pathfinder/pathfinder" { interface State { … } }`. */
 // deno-lint-ignore no-empty-interface
 export interface State {}
+/** Long-lived app data provided at construction (`context.app`); fields open — plugins and overlays may self-register services. */
 // deno-lint-ignore no-empty-interface
 export interface App {}
+/** The matched route's metadata (module named exports), frozen per route. */
 // deno-lint-ignore no-empty-interface
 export interface Meta {}
 
@@ -40,6 +43,7 @@ export interface RemoteAddress {
   port: number;
 }
 
+/** The streaming-first request-body view: lazy accessors, the composed stream, and `pipeThrough` for queued transforms. */
 export interface PathfinderBody {
   /** Fresh parse per call — no shared-mutable parse results. */
   json(): Promise<unknown>;
@@ -160,12 +164,14 @@ function validateUpgradeHeaders(headers: Headers): void {
 
 // --- Misses (§8.3 data table; "miss" naming reserved for 404/405/204) --------
 
+/** Miss data on the context — `no-match` (partial params + unmatched rest) or `method-miss` (complete params + allowed methods). */
 export type Miss =
   | { kind: "no-match"; params: Params; rest: string }
   | { kind: "method-miss"; params: Params; allowed: string[] };
 
 // --- Context -----------------------------------------------------------------
 
+/** The request-world companion: long-lived app data, per-request state, the route's frozen meta, the manifest accessor, and miss/error payloads inside outcome rendering. */
 export interface Context {
   /** Long-lived app data, shared across requests; provided at construction.
    * Getter-only container, fields OPEN (plugins/overlays self-register). */

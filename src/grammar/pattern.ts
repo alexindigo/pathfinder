@@ -17,11 +17,13 @@
 // syntax and is a build-time error; a literal paren anchor after a param is
 // written with the stop signal (`#a#(v2)`).
 
+/** A literal pattern chunk — may span `/` (radix-compressed). */
 export interface StaticChunk {
   kind: "static";
   text: string;
 }
 
+/** A dynamic capture segment: `#name` with an optional `(type)` annotation and a rest flag for `#...name` (crossing when it occupies a full span). */
 export interface DynamicChunk {
   kind: "dynamic";
   name: string;
@@ -37,6 +39,7 @@ export interface DynamicChunk {
   crossing: boolean;
 }
 
+/** One parsed piece of a pattern: a literal or a dynamic capture. */
 export type Chunk = StaticChunk | DynamicChunk;
 
 /**
@@ -50,6 +53,7 @@ export interface TypeSpec {
   parse(value: string): string | number | bigint;
 }
 
+/** Built-in capture types: `string` passthrough, `num` (decimal, double semantics), `int` (bigint). Extended at boot via the factory's `types` option; immutable afterward. */
 export const typeRegistry: Record<string, TypeSpec> = {
   string: {
     validate: () => true,
@@ -73,6 +77,7 @@ export const typeRegistry: Record<string, TypeSpec> = {
 const NAME_RE = /^[$_A-Za-z][$_A-Za-z0-9]*$/;
 const IDENT_CHAR = /[$_A-Za-z0-9]/;
 
+/** Parse a `#`-grammar pattern into its chunk sequence, validating type annotations against the registry. */
 export function parsePattern(
   pattern: string,
   registry: Record<string, TypeSpec> = typeRegistry,

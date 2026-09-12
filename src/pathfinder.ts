@@ -15,6 +15,7 @@ import layer0Tree from "./layer0.ts";
 import type { LookupResult } from "./grammar/matcher.ts";
 import type { TypeSpec } from "./grammar/pattern.ts";
 
+/** Options for `pathfinder()` — Layer-1 app roots, long-lived app data, and the custom param-type registry. */
 export interface PathfinderOptions {
   /** Layer 1 app roots (Layer 0 ships in the package; Layer 2+ is
    * `PATHFINDER_USER_ENDPOINTS`, always on). Missing app root → error. */
@@ -31,6 +32,7 @@ export interface PathfinderOptions {
  * tombstone — tombstones first-class = heartbleed verification). */
 export type { ManifestRow };
 
+/** The callable app: the main loop itself (function-with-properties), plus `manifest()` and `lookup()` for observability and introspection. Hand it straight to `Deno.serve`. */
 export interface PathfinderApp {
   (request: Request, info?: unknown): Promise<Response>;
   manifest(): readonly ManifestRow[];
@@ -51,6 +53,7 @@ export function envRoots(): (string | URL)[] {
   );
 }
 
+/** Boot a pathfinder app: walk the endpoint trees, compile the automaton, return the callable app — `Deno.serve(await pathfinder("./endpoints/"))`. */
 export async function pathfinder(
   options: string | PathfinderOptions,
 ): Promise<PathfinderApp> {

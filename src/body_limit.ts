@@ -4,8 +4,11 @@
 // constants are honest binary names. One counting transform guards both
 // consumption styles (accessors and .stream); 413 joins the outcome map.
 
+/** One kibibyte (1024 bytes) — body-limit arithmetic. */
 export const KiB = 1024;
+/** One mebibyte — body-limit arithmetic (`10 * MiB`). */
 export const MiB = 1024 * KiB;
+/** One gibibyte — body-limit arithmetic. */
 export const GiB = 1024 * MiB;
 
 /** Mid-stream / pre-parse signal that the request body crossed its limit.

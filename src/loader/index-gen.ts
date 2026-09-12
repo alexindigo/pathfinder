@@ -78,7 +78,15 @@ export async function generateIndex(
   const imports: string[] = []; // relative paths, emission order
 
   async function visit(dirRel: string): Promise<void> {
+    // Deterministic emission: readDir order is filesystem-dependent — sort
+    // so the same tree generates the same bytes on every machine (the
+    // drift gate compares generated content byte-for-byte).
+    const items: Deno.DirEntry[] = [];
     for await (const item of Deno.readDir(absDir + "/" + dirRel)) {
+      items.push(item);
+    }
+    items.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const item of items) {
       const rel = dirRel === "" ? item.name : dirRel + item.name;
       if (item.isDirectory) {
         await visit(rel.endsWith("/") ? rel : rel + "/");

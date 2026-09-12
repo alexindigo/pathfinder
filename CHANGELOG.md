@@ -12,8 +12,8 @@ captures along that folder's path, so the two compose. Miss handlers and
 outcome pages that consume `context.miss.rest` need updating. Nothing else in
 the public surface changed.
 
-- matcher: fact entries + always-dict walk (`b7aa3e2`)
-- router: dispatch from the merged dict chain (`deaad08`)
+- matcher: fact entries + always-dict walk (`bd6b2c6`)
+- router: dispatch from the merged dict chain (`e708b22`)
 
 ### Fix
 
@@ -23,8 +23,8 @@ directories — a leafless directory holding only outcome/middleware files (e.g.
 middleware body access. Both are pinned at wire level by the integration
 matrix.
 
-- router: dispatch from the merged dict chain (`deaad08`)
-- tests: cascade integration matrix (`1917b3f`)
+- router: dispatch from the merged dict chain (`e708b22`)
+- tests: cascade integration matrix (`06b08cc`)
 
 ### Feature
 
@@ -41,11 +41,11 @@ page fires. The post-walk directory scan is gone, and the bench proves it:
 fileless-miss baselines held (~55.6k ops/s direct, the tactical slice
 regression gone). SEMANTICS.md §6 is the normative spec.
 
-- router: dispatch from the merged dict chain (`deaad08`)
-- loader: compile middleware/outcome files as automaton facts (`91cf32d`)
-- tests: cascade integration matrix (`1917b3f`)
-- bench: fact-bearing miss scenarios (`8de33a7`)
-- docs: SEMANTICS §6 — anchors are walk facts (`c17cb14`)
+- router: dispatch from the merged dict chain (`e708b22`)
+- loader: compile middleware/outcome files as automaton facts (`ace809f`)
+- tests: cascade integration matrix (`06b08cc`)
+- bench: fact-bearing miss scenarios (`c6ef5d4`)
+- docs: SEMANTICS §6 — anchors are walk facts (`183501a`)
 
 ## 2026-09-10
 
@@ -59,8 +59,8 @@ points, and the miss anchor is the deepest fact-bearing stand. Serve-level
 perf harness ships alongside (wire + direct modes, scenarios isolating each
 hot path).
 
-- matcher: fact entries + always-dict walk (`b7aa3e2`)
-- bench: serve-level perf harness (`60f4c33`)
+- matcher: fact entries + always-dict walk (`bd6b2c6`)
+- bench: serve-level perf harness (`c2e4922`)
 
 ## 2026-09-08
 
@@ -95,13 +95,13 @@ the body verbatim via the return-contract coercion — the `{"detail": …}`
 envelope is no longer imposed (the Layer-0 default outcome pages keep it as
 _our_ choice; consumers write their own shape explicitly).
 
-- websocket: request.upgrade() + materialize 101 in-place handling (`d5e2055`)
+- websocket: request.upgrade() + materialize 101 in-place handling (`31f56cb`)
 - middleware: ship the optional set (cors, clientIp, logger, timing, accessLog,
-  compress) (`478d3e1`)
-- http: ParseError + parseJson convenience (`3774af6`)
-- docs: coming-from-hono, dev notes, error-shapes teaching doc (`9231d20`)
-- namespace: re-group the public surface into subpaths (`293f8cc`)
-- http: payload-agnostic HttpError — the body is the payload (`717d832`)
+  compress) (`cf28bc4`)
+- http: ParseError + parseJson convenience (`59b753a`)
+- docs: coming-from-hono, dev notes, error-shapes teaching doc (`d96a04b`)
+- namespace: re-group the public surface into subpaths (`9e9d02f`)
+- http: payload-agnostic HttpError — the body is the payload (`1097291`)
 
 ## 2026-09-01
 

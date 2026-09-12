@@ -1,0 +1,22 @@
+name: Publish
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC — JSR provenance, no secrets
+    steps:
+      - uses: actions/checkout@v6
+      - uses: denoland/setup-deno@v2
+      - name: tag matches deno.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(jq -r .version deno.json)
+          test "$TAG" = "$PKG" || { echo "tag v$TAG != deno.json $PKG"; exit 1; }
+      - run: deno task check && deno lint && deno fmt --check && deno task gen:check
+      - run: deno task test
+      - run: deno publish --dry-run
+      - run: deno publish

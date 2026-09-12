@@ -816,15 +816,76 @@ export class Router {
     );
   }
 
-  /** Streaming forfeited under this dir? (any ancestor middleware flagged) */
-  #dirStreaming(dir: string): boolean {
-    for (const [d, entries] of this.#dirMiddleware) {
-      if (
-        entries.some((e) => e.disableStreaming) &&
-        (d === "" || dir === d || dir.startsWith(d + "/"))
-      ) return true;
+  /** Explicit dir-middleware registrations under `dir` (parent dirs first,
+   * registration order within a dir), keeping each entry's dir for the
+   * merge. */
+  #explicitFor(
+    dir: string,
+  ): { dir: string; middleware: Middleware; disableStreaming: boolean }[] {
+    const dirs = [...this.#dirMiddleware.keys()]
+      .filter((d) => d === "" || dir === d || dir.startsWith(d + "/"))
+      .sort((a, b) => a.length - b.length);
+    const out: {
+      dir: string;
+      middleware: Middleware;
+      disableStreaming: boolean;
+    }[] = [];
+    for (const d of dirs) {
+      for (const e of this.#dirMiddleware.get(d)!) {
+        out.push({ dir: d, ...e });
+      }
     }
-    return false;
+    return out;
+  }
+
+  /** The merged dispatch chain: the dict's file middleware + explicit
+   * `setDirMiddleware` registrations, by directory depth (outer→inner);
+   * within a directory, file facts first (name order), then explicit
+   * entries (registration order). File-only apps get exactly the walk's
+   * order; explicit-only apps get exactly `chainFor`'s order. */
+  #assembleChain(
+    dict: DispatchDict,
+    explicitDir: string,
+  ): { middleware: Middleware; disableStreaming: boolean }[] {
+    const byDir = new Map<
+      string,
+      { middleware: Middleware; disableStreaming: boolean }[]
+    >();
+    const order: string[] = [];
+    for (const fact of dict.chain) {
+      if (fact.kind !== "middleware") continue;
+      const reg = fact.reg as {
+        dir: string;
+        middleware: Middleware;
+        disableStreaming: boolean;
+      };
+      let list = byDir.get(reg.dir);
+      if (list === undefined) {
+        list = [];
+        byDir.set(reg.dir, list);
+        order.push(reg.dir);
+      }
+      list.push({
+        middleware: reg.middleware,
+        disableStreaming: reg.disableStreaming === true,
+      });
+    }
+    for (const e of this.#explicitFor(explicitDir)) {
+      let list = byDir.get(e.dir);
+      if (list === undefined) {
+        list = [];
+        byDir.set(e.dir, list);
+        order.push(e.dir);
+      }
+      list.push({
+        middleware: e.middleware,
+        disableStreaming: e.disableStreaming,
+      });
+    }
+    const sorted = [...order].sort((a, b) => a.length - b.length);
+    const chain: { middleware: Middleware; disableStreaming: boolean }[] = [];
+    for (const d of sorted) chain.push(...byDir.get(d)!);
+    return chain;
   }
 
   /** Register an outcome renderer for a directory. Same contract as shipped;
@@ -891,9 +952,13 @@ export class Router {
         context,
         body,
         upgrade,
-        entry.chain ?? this.chainFor(entry.dir),
+        entry.chain !== null
+          ? entry.chain.map((mw) => ({
+            middleware: mw,
+            disableStreaming: false,
+          }))
+          : this.#assembleChain(result.dict, entry.dir),
         entry.handler,
-        entry.dir,
         result.dict,
         entry.disableStreaming,
       );
@@ -921,9 +986,8 @@ export class Router {
         context,
         body,
         upgrade,
-        this.chainFor(anchorDir),
+        this.#assembleChain(result.dict, anchorDir),
         handler,
-        anchorDir,
         result.dict,
         false,
       );
@@ -946,9 +1010,8 @@ export class Router {
       context,
       body,
       upgrade,
-      this.chainFor(anchorDir),
+      this.#assembleChain(anchor.dict, anchorDir),
       handler,
-      anchorDir,
       anchor.dict,
       false,
     );
@@ -961,9 +1024,8 @@ export class Router {
     context: Context,
     body: RequestBody,
     upgrade: UpgradeState,
-    chain: Middleware[],
+    chain: { middleware: Middleware; disableStreaming: boolean }[],
     handler: Handler,
-    anchorDir: string,
     dict: DispatchDict,
     entryDisableStreaming: boolean,
   ): Promise<Response> {
@@ -975,14 +1037,17 @@ export class Router {
     // The miss-chain rule runs the same directory chain on misses, so a
     // body-reading middleware has the same access on misses it has on
     // matches.
-    if (entryDisableStreaming || this.#dirStreaming(anchorDir)) {
+    if (
+      entryDisableStreaming ||
+      chain.some((entry) => entry.disableStreaming)
+    ) {
       body.allowMiddlewareAccess();
     }
 
     try {
       let rawUsed = request._raw.bodyUsed;
       for (let i = 0; i < chain.length; i++) {
-        const mw = chain[i];
+        const mw = chain[i].middleware;
         const result = await mw(request, context);
         // _raw consumption mid-chain detection (bodyUsed snapshots).
         if (request._raw.bodyUsed && !rawUsed && !body.consumedSelf) {

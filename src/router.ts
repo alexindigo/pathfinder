@@ -49,6 +49,9 @@ export interface PathfinderBody {
   json(): Promise<unknown>;
   text(): Promise<string>;
   form(): Promise<FormData>;
+  /** Raw body bytes, memoized — same semantics as `text()`: one read,
+   * cached; does not break `text()`/`json()`/`form()` afterward. */
+  bytes(): Promise<Uint8Array>;
   /** The native stream (through any queued transforms). Null without a body. */
   readonly stream: ReadableStream<Uint8Array> | null;
   /** Queue a transform — composed lazily, fed to `.stream` AND accessors;
@@ -490,6 +493,11 @@ class RequestBody implements PathfinderBody {
   text(): Promise<string> {
     this.#guardAccessor();
     return this.#memoText();
+  }
+
+  bytes(): Promise<Uint8Array> {
+    this.#guardAccessor();
+    return this.#memoBytes();
   }
 
   form(): Promise<FormData> {

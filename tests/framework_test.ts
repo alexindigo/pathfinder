@@ -493,6 +493,56 @@ Deno.test("body: form accessor", async () => {
   assertEquals(await res.json(), { v: "hello" });
 });
 
+Deno.test("body: bytes accessor memoizes; text/json still work after", async () => {
+  const router = makeRouter();
+  router.add("POST", "/", async (request) => {
+    const a = await request.body.bytes();
+    const b = await request.body.bytes();
+    const t = await request.body.text();
+    const j = await request.body.json() as { k: number };
+    return { same: a === b, t, j };
+  });
+  const res = await dispatch(
+    router,
+    new Request("http://localhost/", {
+      method: "POST",
+      body: JSON.stringify({ k: 1 }),
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  assertEquals(await res.json(), { same: true, t: '{"k":1}', j: { k: 1 } });
+});
+
+Deno.test("body: bytes supports fatal UTF-8 decoding", async () => {
+  const router = makeRouter();
+  router.add("POST", "/", async (request) => {
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(
+        await request.body.bytes(),
+      );
+      return "decoded";
+    } catch {
+      return "rejected";
+    }
+  });
+  const bad = await dispatch(
+    router,
+    new Request("http://localhost/", {
+      method: "POST",
+      body: new Uint8Array([0x81]),
+    }),
+  );
+  assertEquals(await bad.text(), "rejected");
+  const good = await dispatch(
+    router,
+    new Request("http://localhost/", {
+      method: "POST",
+      body: "ok",
+    }),
+  );
+  assertEquals(await good.text(), "decoded");
+});
+
 Deno.test("body: stream access; accessors-after-stream named error", async () => {
   const router = makeRouter();
   router.add("POST", "/stream", async (request) => {

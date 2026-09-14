@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-09-13
+
+### Feature
+
+`body.bytes()` — a memoized raw accessor beside `text()`/`json()`, exposing the
+internal `#bytes` memo: one read, cached, and `text()`/`json()`/`form()` still
+work after it. Unblocks fatal-UTF-8 JSON validation (`new TextDecoder("utf-8",
+{ fatal: true })` over the bytes, once, subtree-wide) — e.g. Matrix's
+invalid-UTF-8 → `400 M_NOT_JSON` rule, which `text()` (non-fatal U+FFFD) and
+`json()` (structure-only) cannot express.
+
+- body: expose memoized bytes() accessor (`5d6b841`)
+
+### Fix
+
+Thrown `HttpError`s are now visible to outcome pages: the HttpError catch branch
+sets `context.error = error` before the page renders — it was the only error
+branch that didn't (413 and uncaught already do) — so a subtree page reads the
+thrown errcode/message instead of a fixed miss text, and `context.miss` stays
+the clean miss/thrown discriminator. The error's explicit headers ride along on
+the page path too: an envelope header merge with one shared rule (the same
+semantics the verbatim fallback already used) — the error's headers win, the
+page's own headers fill the gaps.
+
+- http: context.error for outcome pages + envelope header merge (`2c1d256`)
+
+### Docs
+
+`Context.error` no longer documents as 500-only (the 413 and thrown-HttpError
+branches set it too), and `HttpError.headers` documents as riding along in both
+the fallback and the outcome-page path — true on both paths once the merge
+lands.
+
+- http: context.error for outcome pages + envelope header merge (`2c1d256`)
+
 ## 2026-09-11
 
 ### Breaking

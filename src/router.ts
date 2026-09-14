@@ -188,7 +188,8 @@ export interface Context {
   _manifest(): readonly ManifestRow[];
   /** Miss data — present only inside 404/405/204 outcome rendering. */
   miss?: Miss;
-  /** The thrown value — present only inside 500 outcome rendering. */
+  /** The thrown value — present inside outcome rendering after an error —
+   * 413, 500, thrown HttpError. */
   error?: unknown;
 }
 
@@ -1105,11 +1106,17 @@ export class Router {
         // The branch's dict resolves the status first (the promise covers
         // endpoint-produced codes: the closest outcome page renders when
         // the app shipped one); without a page the body renders verbatim.
+        // The thrown value is visible to the page (context.error), and the
+        // error's headers ride along — error wins, page fills the gaps.
+        context.error = error;
         const page = this.#resolveOutcome(error.status, dict);
         try {
           response = page === null
             ? renderHttpError(error)
-            : coerceResult(await page(request, context));
+            : this.#mergeHeaders(
+              coerceResult(await page(request, context)),
+              error.headers,
+            );
         } catch (coerceError) {
           // A body the return contract can't represent is a programming
           // error — loud 500, never a silent fallback.
@@ -1169,6 +1176,25 @@ export class Router {
     }
 
     return view.materialize();
+  }
+
+  /** Envelope header merge on the HttpError page path — one rule, the same
+   * as `renderHttpError`: the error's explicit headers win; the page's own
+   * headers fill the gaps. */
+  #mergeHeaders(
+    response: Response,
+    errorHeaders: HeadersInit | undefined,
+  ): Response {
+    if (errorHeaders === undefined) return response;
+    const headers = new Headers(errorHeaders); // the error's headers win
+    for (const [key, value] of response.headers) {
+      if (!headers.has(key)) headers.set(key, value);
+    }
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   }
 
   async #renderOutcome(

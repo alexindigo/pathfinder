@@ -184,6 +184,75 @@ Deno.test("contract: HttpError(Response) → itself with the error's status", as
   assertEquals(await res.text(), "teapot");
 });
 
+Deno.test("contract: HttpError outcome page sees context.error", async () => {
+  const router = makeRouter();
+  router.add("GET", "/_matrix/client/v3/login", () => {
+    throw new HttpError(404, {
+      errcode: "M_UNRECOGNIZED",
+      error: "Unrecognized request",
+    });
+  });
+  router.setOutcome(404, "/_matrix", (_request, context) => {
+    const err = context.error as { body?: { errcode?: string } };
+    return json(
+      { where: "page", errcode: err?.body?.errcode },
+      { status: 404 },
+    );
+  });
+  const res = await dispatch(router, GET("/_matrix/client/v3/login"));
+  assertEquals(res.status, 404);
+  assertEquals(await res.json(), {
+    where: "page",
+    errcode: "M_UNRECOGNIZED",
+  });
+});
+
+Deno.test("contract: miss dispatch untouched — miss present, error absent", async () => {
+  const router = makeRouter();
+  router.add("GET", "/x", () => "x");
+  router.setOutcome(404, "", (_request, context) =>
+    json({
+      miss: context.miss !== undefined,
+      error: context.error !== undefined,
+    }, { status: 404 }));
+  const res = await dispatch(router, GET("/nope"));
+  assertEquals(res.status, 404);
+  assertEquals(await res.json(), { miss: true, error: false });
+});
+
+Deno.test("contract: HttpError headers merge onto outcome page — error wins", async () => {
+  const router = makeRouter();
+  router.add("GET", "/x", () => {
+    throw new HttpError(401, { detail: "no" }, {
+      "WWW-Authenticate": `Bearer realm="x"`,
+      "x-error": "wins",
+    });
+  });
+  router.setOutcome(401, "", () =>
+    json({ detail: "no" }, {
+      status: 401,
+      headers: { "x-page": "kept", "x-error": "overwritten" },
+    }));
+  const res = await dispatch(router, GET("/x"));
+  assertEquals(res.status, 401);
+  assertEquals(res.headers.get("www-authenticate"), `Bearer realm="x"`);
+  assertEquals(res.headers.get("x-page"), "kept", "page headers fill gaps");
+  assertEquals(res.headers.get("x-error"), "wins", "error headers win");
+  assertEquals(await res.json(), { detail: "no" });
+});
+
+Deno.test("contract: HttpError fallback page unchanged (verbatim body)", async () => {
+  const router = makeRouter();
+  router.add("GET", "/x", () => {
+    throw new HttpError(404, { detail: "Not Found" }, { "x-error": "yes" });
+  });
+  const res = await dispatch(router, GET("/x"));
+  assertEquals(res.status, 404);
+  assertEquals(res.headers.get("x-error"), "yes");
+  assertEquals(res.headers.get("content-type"), "application/json");
+  assertEquals(await res.json(), { detail: "Not Found" });
+});
+
 Deno.test("contract: primitives/null are loud 500 violations", async () => {
   await quiet(async () => {
     const router = makeRouter();

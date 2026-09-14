@@ -13,7 +13,8 @@ import { text } from "./response.ts";
  * verbatim, coerced by the same rules as the handler return contract —
  * object/array → JSON; string → text/plain; `Response` → itself with this
  * error's status applied; absent → empty body. Optional headers ride along
- * (e.g. `WWW-Authenticate` on 401) and win over body-implied headers.
+ * in both the fallback and the outcome-page path (e.g. `WWW-Authenticate` on
+ * 401) and win over body-implied/page headers.
  *
  * ```ts
  * // Matrix-shaped errors, full throw ergonomics:

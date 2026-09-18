@@ -18,7 +18,7 @@ refuses to contain.
 
 ```
 name    := [$_A-Za-z][$_A-Za-z0-9]*        (ASCII; legal JS identifier)
-dynamic := "#" [ "(" type ")" ] ["..."] name [ "#" ]
+dynamic := "#" [ "#" ] [ "(" type ")" ] ["..."] name [ "#" ]
 type    := registry lookup
 ```
 
@@ -26,6 +26,16 @@ type    := registry lookup
   `#` **stop signal** (consumed; belongs to no chunk). The stop is only needed
   when the following anchor starts with an identifier character or `(` — e.g.
   `/v/#version#osx`, `/dl/#file_version#_x86`.
+- A second `#` immediately after the opener marks the capture **empty-ok**
+  (`##name`, `##(int)n`): the bounded window may be zero length **because the
+  path is finished there** (or only the leaf's one tolerated trailing `/`
+  remains) — never because the next byte is `/`. The param is then **absent**
+  from the capture set (not `""`); types never see an empty take —
+  `validate`/`parse` run only on a non-empty take, so `##(int)n` means absent
+  or a valid int. Empty-ok is terminal-only in practice: with a following
+  anchor the path is not finished, so the zero-length take never fires. The
+  marker sits only in the slot before type/name — after a name, `#` stays the
+  stop signal.
 - A `(` directly after a dynamic's name is **reserved** for future parameterized
   syntax and is a build-time error today. A literal paren anchor after a param
   is written with the stop signal: `#a#(v2)`.
@@ -34,7 +44,9 @@ type    := registry lookup
   on the right, or pattern boundary). Otherwise it is a bounded dynamic.
   Non-rest dynamics are never crossing.
 - Repeating a name in one pattern imposes an equality constraint (§5).
-  Re-annotating a name with a different type is a build error.
+  Re-annotating a name with a different type is a build error. Repeating an
+  **empty-ok** name is a build error (the capture may be absent — nothing to
+  bind to).
 
 ### Types (registry v2)
 
@@ -55,8 +67,9 @@ boot. The built-ins above are examples of the same mechanism.
 ### Build-time errors
 
 Unclosed type annotation · unknown type · invalid parameter name · empty anchor
-between two dynamics (e.g. `#a##b`) · `(type)` on a rest · conflicting type
-re-annotation · `(` after a name (reserved). Patterns are validated at
+between two dynamics (e.g. `#a##b`) · `(type)` on a rest · `##` on a rest (a
+rest is already a non-empty take) · conflicting type re-annotation · repeating
+an empty-ok name · `(` after a name (reserved). Patterns are validated at
 registration; nothing at runtime.
 
 ## 2. Matching model
@@ -72,7 +85,16 @@ capture.
 
 - **Bounded dynamics** capture within a single no-slash window. With an anchor,
   the capture ends at the first position where the entire next anchor matches,
-  then hard-commits — no retry at a later occurrence. An empty capture fails.
+  then hard-commits — no retry at a later occurrence. An empty capture fails —
+  unless the edge is **empty-ok** (`##name`): then the zero-length take is legal
+  exactly when the path is finished there (or only the leaf's one tolerated
+  trailing `/` remains), the child is pushed with **no** capture, and the param
+  is absent from `params`. Empty because the next byte is `/` still fails (the
+  wall): `/ping##ext` matches `/ping` (no `ext`) and `/ping.view`
+  (`ext = ".view"`), never `/ping/view`. A required sibling and an empty-ok one
+  are distinct edges; a route and its empty-ok terminal form answering the same
+  path (`ping/get.ts` + `ping##ext/get.ts` → `GET /ping`) is a duplicate-route
+  build error.
 - **Crossing rests take the raw remainder byte-for-byte.** Slashes are ordinary
   payload bytes inside a crossing capture: `/tr/#...p` matches `/tr/a//b` with
   `p = "a//b"`, `/tr//` with `p = "/"`, and `/tr/a/b/` with `p = "a/b/"`.

@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-09-18
+
+### Feature
+
+Empty-ok captures: a second `#` immediately after the capture opener marks the
+param as allowed-absent — `##name` (untyped) and `##(int)n` (nullable int:
+absent, or present and a valid int; types never see `""`). The bounded window
+may be zero length **because the path is finished there** (or only the leaf's
+one tolerated trailing `/` remains) — never because the next byte is `/`, so
+`/ping##ext` matches `/ping` (no `ext`) and `/ping.view` (`ext = ".view"`) but
+still misses `/ping/view`. One bounded edge with an `emptyOk` flag — no extra
+compiled route, no ε-kind, no optional groups; required `#name` is unchanged.
+Duplicate detection treats a route and its empty-ok terminal form answering the
+same path as one route (`ping/get.ts` + `ping##ext/get.ts` → duplicate
+`GET /ping`), and `$types` emits `name?: T` for empty-ok params (compound
+dirnames like `ping##ext` included). `$types`' dirname reader now sees dynamics
+in compound segments at all (`ping#x.json` → `x`) — previously only
+`#`-prefixed dirnames contributed params.
+
+- grammar: ##name empty-ok captures (`9038fb7`)
+- loader: $types optional params for ## captures (`ea4c838`)
+
 ## 2026-09-13
 
 ### Feature

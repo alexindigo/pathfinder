@@ -22,6 +22,15 @@ in compound segments at all (`ping#x.json` → `x`) — previously only
 - grammar: ##name empty-ok captures (`9038fb7`)
 - loader: $types optional params for ## captures (`ea4c838`)
 
+### Docs
+
+Empty-ok terminals that share a path answer by edge priority — typed bounded
+before untyped bounded (`ping##(int)n` + `ping##ext`: the int route wins
+`/ping`; the untyped route still answers `/ping.view`). Two empty-ok terminals
+of the same shape (`routeShapeKey` `##` vs `##(type)`) are a duplicate-route
+build error, even with different capture names. SEMANTICS §2 + pinned tests —
+behavior unchanged from 0.2.3, now documented.
+
 ## 2026-09-13
 
 ### Feature

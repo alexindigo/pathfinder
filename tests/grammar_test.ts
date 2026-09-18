@@ -392,6 +392,43 @@ Deno.test("empty-ok: duplicate shape — ping/get.ts + ping##ext/get.ts collide"
   );
 });
 
+Deno.test("empty-ok: typed beats untyped on the empty take (both insert orders)", () => {
+  const typed = (p: Record<string, unknown>) => ({ who: "typed", ...p });
+  const untyped = (p: Record<string, unknown>) => ({ who: "untyped", ...p });
+  for (
+    const routes of [
+      [
+        { method: "GET", pattern: "/ping##ext", handler: untyped },
+        { method: "GET", pattern: "/ping##(int)n", handler: typed },
+      ],
+      [
+        { method: "GET", pattern: "/ping##(int)n", handler: typed },
+        { method: "GET", pattern: "/ping##ext", handler: untyped },
+      ],
+    ]
+  ) {
+    const m = new CompiledMatcher(routes);
+    assertEquals(m.handle("GET", "/ping"), { who: "typed" });
+    assertEquals(m.handle("GET", "/ping.view"), {
+      who: "untyped",
+      ext: ".view",
+    });
+    assertEquals(m.handle("GET", "/ping12"), { who: "typed", n: 12n });
+  }
+});
+
+Deno.test("empty-ok: two untyped terminals same method are a duplicate", () => {
+  assertThrows(
+    () =>
+      new CompiledMatcher([
+        { method: "GET", pattern: "/ping##a", handler: sharedHandler },
+        { method: "GET", pattern: "/ping##b", handler: sharedHandler },
+      ]),
+    Error,
+    "Duplicate route pattern:",
+  );
+});
+
 Deno.test("empty-ok: typed — absent skips validate/parse, present must pass", () => {
   const m = new CompiledMatcher([
     { method: "GET", pattern: "/foo##(int)n", handler: sharedHandler },

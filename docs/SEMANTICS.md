@@ -93,8 +93,14 @@ capture.
   wall): `/ping##ext` matches `/ping` (no `ext`) and `/ping.view`
   (`ext = ".view"`), never `/ping/view`. A required sibling and an empty-ok one
   are distinct edges; a route and its empty-ok terminal form answering the same
-  path (`ping/get.ts` + `ping##ext/get.ts` → `GET /ping`) is a duplicate-route
-  build error.
+   path (`ping/get.ts` + `ping##ext/get.ts` → `GET /ping`) is a duplicate-route
+   build error. Two empty-ok terminals that answer the same path follow edge
+   priority — typed bounded before untyped bounded (§2 opening):
+   `ping##(int)n` + `ping##ext` both GET — the int route wins `/ping`; the
+   untyped route still answers `/ping.view`. Two empty-ok terminals of the
+   same shape (same method, same type class — `routeShapeKey` `##` vs
+   `##(type)`) are a duplicate-route build error, even when the capture names
+   differ (`ping##a` + `ping##b`). GET + POST on the same path coexist.
 - **Crossing rests take the raw remainder byte-for-byte.** Slashes are ordinary
   payload bytes inside a crossing capture: `/tr/#...p` matches `/tr/a//b` with
   `p = "a//b"`, `/tr//` with `p = "/"`, and `/tr/a/b/` with `p = "a/b/"`.

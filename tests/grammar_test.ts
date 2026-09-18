@@ -15,13 +15,19 @@ import { midFamilyPath } from "./fixtures/paths/edgecases.ts";
 
 function dyn(
   name: string,
-  opts: { type?: string; rest?: boolean; crossing?: boolean } = {},
+  opts: {
+    type?: string;
+    rest?: boolean;
+    emptyOk?: boolean;
+    crossing?: boolean;
+  } = {},
 ): Chunk {
   return {
     kind: "dynamic",
     name,
     type: opts.type ?? "string",
     rest: opts.rest ?? false,
+    emptyOk: opts.emptyOk ?? false,
     crossing: opts.crossing ?? false,
   };
 }
@@ -296,6 +302,122 @@ Deno.test("grammar v2 — route shape key normalization", () => {
   // Different shapes → different keys.
   assert(routeShapeKey("/x/#(int)a") !== routeShapeKey("/x/#a"));
   assert(routeShapeKey("/x/#a") !== routeShapeKey("/x/#...a"));
+  // Empty-ok marks its own shape — required and empty-ok are not duplicates.
+  assert(routeShapeKey("/x/#a") !== routeShapeKey("/x/##a"));
+  assert(routeShapeKey("/x/##(int)a") !== routeShapeKey("/x/#(int)a"));
+  assert(routeShapeKey("/x/##a") !== routeShapeKey("/x/##(int)a"));
+});
+
+// --- Empty-ok captures (##name) ------------------------------------------------
+
+Deno.test("empty-ok: parse ping##ext — marker, name, string type", () => {
+  assertEquals(parsePattern("/ping##ext"), [
+    static_("/ping"),
+    dyn("ext", { emptyOk: true }),
+  ]);
+});
+
+Deno.test("empty-ok: parse ping#ext — required, no marker", () => {
+  assertEquals(parsePattern("/ping#ext"), [
+    static_("/ping"),
+    dyn("ext"),
+  ]);
+});
+
+Deno.test("empty-ok: parse ##(int)n — typed empty-ok", () => {
+  assertEquals(parsePattern("/foo##(int)n"), [
+    static_("/foo"),
+    dyn("n", { type: "int", emptyOk: true }),
+  ]);
+});
+
+Deno.test("empty-ok: ##...x is a parse error (rest is already a take)", () => {
+  assertThrows(() => parsePattern("/x/##...y"), Error, 'Empty-ok "##"');
+});
+
+Deno.test("empty-ok: stop signal still only after a name", () => {
+  // `##a#b` — empty-ok a, stop, static b (no empty-ok on the second slot).
+  assertEquals(parsePattern("/x/##a#b"), [
+    static_("/x/"),
+    dyn("a", { emptyOk: true }),
+    static_("b"),
+  ]);
+  // `ping#ext` after a static stays a plain required capture.
+  assertEquals(parsePattern("/ping#ext"), [static_("/ping"), dyn("ext")]);
+});
+
+const compiledEmptyOk = new CompiledMatcher([
+  { method: "GET", pattern: "/ping##ext", handler: sharedHandler },
+]);
+
+Deno.test("empty-ok: absent capture matches with the param absent", () => {
+  expectMatchEmptyOk("/ping", {});
+  expectMatchEmptyOk("/ping/", {}); // the leaf's one tolerated trailing `/`
+});
+
+Deno.test("empty-ok: present capture takes as usual", () => {
+  expectMatchEmptyOk("/ping.view", { ext: ".view" });
+  expectMatchEmptyOk("/pingXYZ", { ext: "XYZ" });
+});
+
+Deno.test("empty-ok: the wall holds — empty because of `/` never matches", () => {
+  expectNoMatchEmptyOk("/ping/view");
+});
+
+function expectMatchEmptyOk(url: string, expected: Record<string, unknown>) {
+  assertEquals(compiledEmptyOk.handle("GET", url), expected, `GET ${url}`);
+}
+
+function expectNoMatchEmptyOk(url: string) {
+  assertEquals(compiledEmptyOk.handle("GET", url), null, `GET ${url}`);
+}
+
+Deno.test("empty-ok: required sibling unchanged — /rooms/ misses", () => {
+  const m = new CompiledMatcher([
+    { method: "GET", pattern: "/rooms/#id", handler: sharedHandler },
+  ]);
+  assertEquals(m.handle("GET", "/rooms/"), null);
+  assertEquals(m.handle("GET", "/rooms/7"), { id: "7" });
+});
+
+Deno.test("empty-ok: duplicate shape — ping/get.ts + ping##ext/get.ts collide", () => {
+  assertThrows(
+    () =>
+      new CompiledMatcher([
+        { method: "GET", pattern: "/ping", handler: sharedHandler },
+        { method: "GET", pattern: "/ping##ext", handler: sharedHandler },
+      ]),
+    Error,
+    "Duplicate route: GET /ping",
+  );
+});
+
+Deno.test("empty-ok: typed — absent skips validate/parse, present must pass", () => {
+  const m = new CompiledMatcher([
+    { method: "GET", pattern: "/foo##(int)n", handler: sharedHandler },
+  ]);
+  assertEquals(m.handle("GET", "/foo"), {});
+  assertEquals(m.handle("GET", "/foo12"), { n: 12n });
+  assertEquals(m.handle("GET", "/foo12a"), null);
+});
+
+Deno.test("empty-ok: bound-ref of an empty-ok name is a load error", () => {
+  assertThrows(
+    () =>
+      new CompiledMatcher([
+        { method: "GET", pattern: "/x/##a/into/##a", handler: sharedHandler },
+      ]),
+    Error,
+    "cannot repeat",
+  );
+});
+
+Deno.test("empty-ok: // still rejects outside crossing spans", () => {
+  const m = new CompiledMatcher([
+    { method: "GET", pattern: "/a/##b/c", handler: sharedHandler },
+  ]);
+  assertEquals(m.handle("GET", "/a//c"), null);
+  assertEquals(m.handle("GET", "/a/x/c"), { b: "x" });
 });
 
 // --- New-capability matching -------------------------------------------------

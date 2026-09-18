@@ -7,8 +7,13 @@
 // the one character a bounded dynamic refuses to contain.
 //
 //   name    := [$_A-Za-z][$_A-Za-z0-9]*        (ASCII; legal JS identifier)
-//   dynamic := "#" [ "(" type ")" ] ["..."] name [ "#" ]
+//   dynamic := "#" [ "#" ] [ "(" type ")" ] ["..."] name [ "#" ]
 //   type    := registry lookup
+//
+// A second `#` immediately after the opener marks the capture empty-ok:
+// the bounded window may be zero length when the path is finished there
+// (never because the next byte is `/`). The marker sits only in the slot
+// before type/name — after a name, `#` stays the stop signal.
 //
 // A dynamic's name ends at the first non-identifier character or at an
 // explicit `#` stop signal (consumed, belongs to no chunk). The stop is only
@@ -30,6 +35,10 @@ export interface DynamicChunk {
   type: string;
   /** `...` was present in the source pattern. */
   rest: boolean;
+  /** A second `#` after the opener: the bounded window may be zero length
+   * (the path finished there), the param then absent from the capture set.
+   * Never crossing, never a rest. */
+  emptyOk: boolean;
   /**
    * Rest classification: a `#...name` is crossing iff it occupies a full
    * inter-slash span (adjacent anchors end with `/` on the left and start
@@ -102,6 +111,13 @@ export function parsePattern(
     }
     flushStatic();
     i++;
+    // A second `#` immediately after the opener marks the capture empty-ok
+    // (only in the slot before type/name — after a name `#` is the stop).
+    let emptyOk = false;
+    if (pattern[i] === "#") {
+      emptyOk = true;
+      i++;
+    }
     let type = "string";
     let explicitType = false;
     if (pattern[i] === "(") {
@@ -124,6 +140,11 @@ export function parsePattern(
     if (rest && explicitType) {
       throw new Error(
         `(type) annotation on a rest dynamic is not supported in pattern "${pattern}"`,
+      );
+    }
+    if (rest && emptyOk) {
+      throw new Error(
+        `Empty-ok "##" on a rest dynamic is not supported in pattern "${pattern}"`,
       );
     }
     if (chunks.length > 0 && chunks[chunks.length - 1].kind === "dynamic") {
@@ -153,7 +174,14 @@ export function parsePattern(
       );
     }
     if (pattern[i] === "#") i++; // stop signal, consumed, belongs to no chunk
-    chunks.push({ kind: "dynamic", name, type, rest, crossing: false });
+    chunks.push({
+      kind: "dynamic",
+      name,
+      type,
+      rest,
+      emptyOk,
+      crossing: false,
+    });
   }
   flushStatic();
 
@@ -187,6 +215,8 @@ export function routeShapeKey(
       ? c.text
       : c.rest
       ? "#..."
+      : c.emptyOk
+      ? (c.type === "string" ? "##" : `##(${c.type})`)
       : c.type === "string"
       ? "#"
       : `#(${c.type})`

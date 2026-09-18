@@ -112,6 +112,9 @@ interface BoundedEdge {
   anchor: string | null;
   /** Type validator from the registry, compiled at build. Null = no check. */
   validate: ((value: string) => boolean) | null;
+  /** `##name` capture: the window may be zero length when the path is
+   * finished there — the child is pushed with no capture taken. */
+  emptyOk: boolean;
   child: Node;
 }
 
@@ -345,7 +348,8 @@ export class CompiledMatcher implements Matcher {
     validate: ((value: string) => boolean) | null,
   ): Node {
     let unified = node.bounded.find((b) =>
-      b.name === chunk.name && b.type === chunk.type && b.anchor === null
+      b.name === chunk.name && b.type === chunk.type &&
+      b.emptyOk === chunk.emptyOk && b.anchor === null
     );
     if (unified === undefined) {
       unified = {
@@ -353,6 +357,7 @@ export class CompiledMatcher implements Matcher {
         type: chunk.type,
         anchor: null,
         validate,
+        emptyOk: chunk.emptyOk,
         child: newNode(),
       };
       addBounded(node, unified);
@@ -364,6 +369,7 @@ export class CompiledMatcher implements Matcher {
     for (const sib of [...node.bounded]) {
       if (
         sib === unified || sib.name !== chunk.name || sib.type !== chunk.type ||
+        sib.emptyOk !== chunk.emptyOk ||
         sib.anchor === null || !sib.anchor.startsWith("/")
       ) continue;
       const target = insertStatic(sib.child, sib.anchor);
@@ -382,6 +388,9 @@ export class CompiledMatcher implements Matcher {
     let node = this.root;
     const chunks = parsePattern(route.pattern, this.registry);
     const bound = new Set<string>();
+    // A terminal empty-ok capture answers the edge-holder's path too (the
+    // zero-length take) — the holder is tracked for duplicate detection.
+    let emptyOkParent: Node | null = null;
     for (let ci = 0; ci < chunks.length; ci++) {
       const chunk = chunks[ci] as Chunk;
       if (chunk.kind === "static") {
@@ -390,7 +399,13 @@ export class CompiledMatcher implements Matcher {
         if (bound.has(chunk.name)) {
           // Bound-ref (repeated name): equality constraint matched by literal
           // insertion at match time. A repeated crossing dynamic needs no
-          // take-loop.
+          // take-loop. An empty-ok capture may be absent from the capture
+          // set — nothing to bind to, a load error here.
+          if (chunk.emptyOk) {
+            throw new Error(
+              `Empty-ok "##" cannot repeat in pattern "${route.pattern}" (the capture may be absent)`,
+            );
+          }
           let ref = node.boundRefs.find((b) => b.name === chunk.name);
           if (!ref) {
             ref = { name: chunk.name, child: newNode() };
@@ -416,9 +431,12 @@ export class CompiledMatcher implements Matcher {
           // and its anchor static.
           const unified = node.bounded.find((b) =>
             b.name === chunk.name && b.type === chunk.type &&
-            b.anchor === null
+            b.emptyOk === chunk.emptyOk && b.anchor === null
           );
           if (unified !== undefined) {
+            if (chunk.emptyOk && anchor === null && ci === chunks.length - 1) {
+              emptyOkParent = node;
+            }
             node = unified.child;
             if (anchor !== null) {
               node = insertStatic(node, anchor);
@@ -429,7 +447,7 @@ export class CompiledMatcher implements Matcher {
           }
           let edge = node.bounded.find((b) =>
             b.name === chunk.name && b.type === chunk.type &&
-            b.anchor === anchor
+            b.emptyOk === chunk.emptyOk && b.anchor === anchor
           );
           if (!edge) {
             edge = {
@@ -437,9 +455,13 @@ export class CompiledMatcher implements Matcher {
               type: chunk.type,
               anchor,
               validate,
+              emptyOk: chunk.emptyOk,
               child: newNode(),
             };
             addBounded(node, edge);
+          }
+          if (chunk.emptyOk && anchor === null && ci === chunks.length - 1) {
+            emptyOkParent = node;
           }
           node = edge.child;
         }
@@ -449,6 +471,16 @@ export class CompiledMatcher implements Matcher {
     if (node.handlers === null) node.handlers = new Map();
     if (node.handlers.has(route.method)) {
       throw new Error(`Duplicate route: ${route.method} ${route.pattern}`);
+    }
+    // A terminal empty-ok capture answers the edge-holder's path too — a
+    // handler there (either insertion order) is the same route twice.
+    if (emptyOkParent?.handlers?.has(route.method)) {
+      throw new Error(`Duplicate route: ${route.method} ${route.pattern}`);
+    }
+    for (const b of node.bounded) {
+      if (b.emptyOk && b.child.handlers?.has(route.method)) {
+        throw new Error(`Duplicate route: ${route.method} ${route.pattern}`);
+      }
     }
     node.handlers.set(route.method, route.handler!);
     if (route.data !== undefined) {
@@ -584,9 +616,15 @@ export class CompiledMatcher implements Matcher {
           }
           if (f.node.handlers !== null) recordMiss(f.node, f.dict);
           if (atEnd) {
-            captures.length = f.capBase;
-            stack.pop();
-            continue;
+            // An empty-ok capture may still take the zero-length window at
+            // the end of the path — fall through to edge matching instead
+            // of popping (the same fall-through the tolerated trailing
+            // slash uses below).
+            if (!f.node.bounded.some((b) => b.emptyOk)) {
+              captures.length = f.capBase;
+              stack.pop();
+              continue;
+            }
           }
           // Tolerated trailing slash but no handler here: fall through to
           // edge matching — a longer route may still consume the `/`.
@@ -611,7 +649,10 @@ export class CompiledMatcher implements Matcher {
         while (f.idx < f.node.boundRefs.length) {
           const ref = f.node.boundRefs[f.idx++];
           const bound = captures.find((c) => c.name === ref.name);
-          if (bound !== undefined && path.startsWith(bound.value, f.pos)) {
+          // An empty-ok capture may be absent from the set — the ref has
+          // nothing to bind to and fails (never `startsWith("")`).
+          if (bound === undefined) continue;
+          if (path.startsWith(bound.value, f.pos)) {
             pushFrame(ref.child, f.pos + bound.value.length);
             pushed = true;
             break;
@@ -638,7 +679,24 @@ export class CompiledMatcher implements Matcher {
             const idx = path.indexOf(edge.anchor, f.pos);
             if (idx !== -1 && idx <= windowEnd) captureEnd = idx;
           }
-          if (captureEnd === -1 || captureEnd === f.pos) continue;
+          if (captureEnd === -1) continue;
+          if (captureEnd === f.pos) {
+            // Empty-ok: the zero-length take is legal only because the path
+            // is finished here (or just the one tolerated trailing `/`
+            // remains) — never because the next byte is `/` (the wall).
+            // The child is pushed with NO capture (the param is absent, not
+            // ""); types never see an empty take.
+            if (
+              edge.emptyOk &&
+              (f.pos === path.length ||
+                (f.pos === path.length - 1 && path[f.pos] === "/"))
+            ) {
+              pushFrame(edge.child, f.pos);
+              pushed = true;
+              break;
+            }
+            continue;
+          }
           const value = path.slice(f.pos, captureEnd);
           if (edge.validate !== null && !edge.validate(value)) continue;
           const capMark = captures.length;

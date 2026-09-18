@@ -25,8 +25,8 @@ interface DirNode {
   /** Relative dir path, "" = root, trailing slash included for children. */
   rel: string;
   children: Map<string, DirNode>;
-  /** Own params: name → TS type. */
-  params: Map<string, string>;
+  /** Own params: name → TS type + optionality (`##name` captures). */
+  params: Map<string, { tsType: string; optional: boolean }>;
 }
 
 function newDir(rel: string): DirNode {
@@ -34,13 +34,17 @@ function newDir(rel: string): DirNode {
 }
 
 /** Dirname → param type per the registry: `#x` → string, `#(num)x` → number,
- * `#(int)x` → bigint, `#...x` → string (rests are untyped). */
-export function dirParams(dirname: string): Map<string, string> {
-  const params = new Map<string, string>();
-  if (!dirname.startsWith("#")) return params;
+ * `#(int)x` → bigint, `#...x` → string (rests are untyped). Empty-ok `##x`
+ * captures are optional (absent from the capture set, never `""`). Compound
+ * segments contribute their dynamics (`ping##ext` → optional `ext`). */
+export function dirParams(
+  dirname: string,
+): Map<string, { tsType: string; optional: boolean }> {
+  const params = new Map<string, { tsType: string; optional: boolean }>();
   let chunks: Chunk[];
   try {
-    // The dirname as a single dynamic segment; the grammar does the rest.
+    // The dirname as a single segment; the grammar does the rest — static
+    // chunks are literal prefix/suffix text, dynamics are the params.
     chunks = parsePattern(dirname);
   } catch {
     return params; // not a param dir (invalid name — build error elsewhere)
@@ -52,7 +56,7 @@ export function dirParams(dirname: string): Map<string, string> {
       : chunk.type === "num"
       ? "number"
       : "string";
-    params.set(chunk.name, tsType);
+    params.set(chunk.name, { tsType, optional: chunk.emptyOk });
   }
   return params;
 }
@@ -93,11 +97,12 @@ function render(node: DirNode, isRoot: boolean): string {
     } else {
       lines.push("export interface Params extends ParentParams {");
       for (
-        const [name, tsType] of [...node.params.entries()].sort(([a], [b]) =>
-          a.localeCompare(b)
-        )
+        const [name, { tsType, optional }] of [...node.params.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
       ) {
-        lines.push(`  ${JSON.stringify(name)}: ${tsType};`);
+        lines.push(
+          `  ${JSON.stringify(name)}${optional ? "?" : ""}: ${tsType};`,
+        );
       }
       lines.push("}");
     }

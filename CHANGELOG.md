@@ -31,6 +31,17 @@ of the same shape (`routeShapeKey` `##` vs `##(type)`) are a duplicate-route
 build error, even with different capture names. SEMANTICS §2 + pinned tests —
 behavior unchanged from 0.2.3, now documented.
 
+### Feature
+
+`request.upgrade(params, options?)` — the managed WebSocket upgrade takes two
+bags: a required RFC 6455 handshake bag (`{}` when empty; `protocol` stamps
+`Sec-WebSocket-Protocol` on the 101, host-enforced overlap with the client's
+offered list) and an optional host-knob bag (`idleTimeout` seconds, `0`
+disables). Zero-arg `upgrade()` is gone — `upgrade({})` is the explicit
+no-handshake form (no in-tree callers, no published consumers of the managed
+path). Further RFC fields and knobs join the same two bags; they do not get a
+third argument.
+
 ## 2026-09-13
 
 ### Feature

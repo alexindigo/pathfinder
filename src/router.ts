@@ -68,6 +68,24 @@ export interface WebSocketUpgrade {
   socket: Promise<WebSocket>;
 }
 
+/** RFC 6455 handshake fields for `request.upgrade()` — the first bag.
+ * Required (pass `{}` when no handshake fields); never host knobs. */
+export interface UpgradeParams {
+  /** Selected subprotocol — stamped as `Sec-WebSocket-Protocol` on the 101.
+   * The host enforces RFC overlap with the client's offered list at
+   * materialize (Deno throws a TypeError on no overlap). */
+  protocol?: string;
+}
+
+/** Host knobs for `request.upgrade()` — the second bag, pathfinder-named,
+ * mapped per adapter. Never RFC handshake fields (those live in
+ * `UpgradeParams`), never `socket`/`head` (adapter guts). */
+export interface UpgradeOptions {
+  /** Seconds of missing pong before the connection is unhealthy; `0`
+   * disables. (Deno: `idleTimeout`, same name and unit, default 30.) */
+  idleTimeout?: number;
+}
+
 /** The request view — input world. `query` is lazy and cached; `headers` is
  * a REFERENCE to the native Headers; `_raw` is the escape hatch (underscore =
  * you own the consequences; expandos don't survive `_raw.clone()`). */
@@ -82,8 +100,10 @@ export interface PathfinderRequest<P = Params> {
    * call yet. Validates the upgrade headers at call time (host-shaped
    * TypeError on failure); the framework performs the upgrade when the
    * returned placeholder Response materializes. One upgrade per request.
-   * The handler owns the socket lifecycle. */
-  upgrade(): WebSocketUpgrade;
+   * The handler owns the socket lifecycle. `params` is the RFC 6455
+   * handshake bag — required, pass `{}` when empty; `options` is host
+   * knobs (`idleTimeout` today). */
+  upgrade(params: UpgradeParams, options?: UpgradeOptions): WebSocketUpgrade;
   remoteAddr?: RemoteAddress;
   /** Resolves when the response has been fully sent on the wire. */
   completed?: Promise<void>;
@@ -98,6 +118,8 @@ interface UpgradeState {
   placeholder: Response | null;
   socket: Promise<WebSocket>;
   settled: boolean;
+  params?: UpgradeParams;
+  options?: UpgradeOptions;
   resolve(ws: WebSocket): void;
   reject(reason: unknown): void;
 }
@@ -358,7 +380,13 @@ class ResponseViewImpl implements ResponseView {
    * response's mutable headers, and ship the host response. */
   #materializeUpgrade(): Response {
     const upgrade = this.#upgrade!;
-    const { socket, response } = Deno.upgradeWebSocket(upgrade.raw);
+    // Map the two bags onto the Deno host — never spread a mixed bag.
+    // `{ protocol: undefined, idleTimeout: undefined }` ≡ the old
+    // no-second-arg call (Deno defaults idleTimeout to 30).
+    const { socket, response } = Deno.upgradeWebSocket(upgrade.raw, {
+      protocol: upgrade.params?.protocol,
+      idleTimeout: upgrade.options?.idleTimeout,
+    });
     upgrade.resolve(socket);
     this.#applyHeadersInPlace(response.headers);
     this.#dropUpgradeEdits();
@@ -677,7 +705,10 @@ function buildRequestView(
     body: { value: body, enumerable: true },
     upgrade: {
       enumerable: true,
-      value: (): WebSocketUpgrade => {
+      value: (
+        params: UpgradeParams,
+        options?: UpgradeOptions,
+      ): WebSocketUpgrade => {
         if (upgrade.declared) {
           // Host message shape — ext/http/00_serve.ts `_throwIfUpgraded`.
           throw new TypeError(
@@ -686,6 +717,8 @@ function buildRequestView(
         }
         validateUpgradeHeaders(raw.headers);
         upgrade.declared = true;
+        upgrade.params = params;
+        upgrade.options = options;
         // Placeholder only — never shipped; the host's real 101 response
         // (with `sec-websocket-accept` etc.) replaces it at materialization.
         upgrade.placeholder = new Response(null, {

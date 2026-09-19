@@ -85,22 +85,30 @@ Deno.exit(0);
 
 ## WebSocket upgrade
 
-To upgrade, call `request.upgrade()` in the handler and return the placeholder
-response it hands back. The framework validates the upgrade headers at call time
-(a `TypeError` with the platform's message shapes on failure), performs the
-actual upgrade when the response materializes, and resolves the socket promise.
-The handler owns the socket lifecycle:
+To upgrade, call `request.upgrade(params)` in the handler and return the
+placeholder response it hands back. The framework validates the upgrade headers
+at call time (a `TypeError` with the platform's message shapes on failure),
+performs the actual upgrade when the response materializes, and resolves the
+socket promise. The handler owns the socket lifecycle:
 
 ```ts
 // endpoints/events/get.ts
 export default (request) => {
-  const upgrade = request.upgrade();
+  const upgrade = request.upgrade({});
   upgrade.socket.then((ws) => {
     ws.onmessage = (ev) => ws.send(ev.data);
     ws.onclose = () => {/* cleanup */};
   });
   return upgrade.response;
 };
+```
+
+`params` is the RFC 6455 handshake bag — required (pass `{}` when empty);
+`options` is host knobs (`idleTimeout` seconds today, `0` disables):
+
+```ts
+request.upgrade({ protocol: "chat" }); // stamps Sec-WebSocket-Protocol
+request.upgrade({ protocol: "chat" }, { idleTimeout: 60 });
 ```
 
 Facts worth knowing:

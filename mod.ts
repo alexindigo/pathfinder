@@ -35,6 +35,8 @@ export type {
   PostFn,
   RemoteAddress,
   State,
+  UpgradeOptions,
+  UpgradeParams,
   WebSocketUpgrade,
 } from "./src/router.ts";
 

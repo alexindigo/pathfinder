@@ -162,7 +162,7 @@ Deno.test("cors: stamp lands on a WebSocket upgrade (in place, wire-level via co
   const router = makeRouter();
   router.setDirMiddleware("", [{ middleware: cors() }]);
   router.add("GET", "/ws", (request) => {
-    const upgrade = request.upgrade();
+    const upgrade = request.upgrade({});
     upgrade.socket.then((ws) => {
       ws.onmessage = (ev) => ws.send(ev.data);
     });

@@ -104,17 +104,22 @@ interface RawHandshake {
 
 /** A real WS client handshake at wire level: plain TCP, HTTP upgrade request,
  * byte-level assertions on the 101, then masked client frames / unmasked
- * server frames. */
+ * server frames. `extraHeaders` appends raw request headers (e.g.
+ * `Sec-WebSocket-Protocol`). */
 async function wsHandshake(
   port: number,
   path: string,
+  extraHeaders?: Record<string, string>,
 ): Promise<RawHandshake> {
   const conn = await Deno.connect({ port });
   const key = btoa(
     String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))),
   );
+  const extra = Object.entries(extraHeaders ?? {})
+    .map(([k, v]) => `${k}: ${v}\r\n`)
+    .join("");
   const request =
-    `GET ${path} HTTP/1.1\r\nHost: localhost:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`;
+    `GET ${path} HTTP/1.1\r\nHost: localhost:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n${extra}\r\n`;
   await conn.write(encoder.encode(request));
   const head = await readUntil(conn, "\r\n\r\n");
   const [statusLine, ...headerLines] = head.split("\r\n");
@@ -166,7 +171,7 @@ Deno.test("websocket: request.upgrade() — 101 with stamped header over the wir
   const router = new Router();
   router.setDirMiddleware("", [{ middleware: corsLike() }]);
   router.add("GET", "/ws", (request) => {
-    const upgrade = request.upgrade();
+    const upgrade = request.upgrade({});
     upgrade.socket.then((ws) => {
       ws.onmessage = (ev) => ws.send(ev.data);
     });
@@ -181,8 +186,36 @@ Deno.test("websocket: request.upgrade() — 101 with stamped header over the wir
       "*",
       "post-fn header stamped in place on the upgrade response",
     );
+    assertEquals(
+      client.headers.get("sec-websocket-protocol"),
+      null,
+      "empty params do not stamp a subprotocol",
+    );
     assertEquals(await client.echo("ping"), "ping");
     assertEquals(await client.echo("hello"), "hello");
+    client.close();
+  } finally {
+    await server.shutdown();
+  }
+});
+
+Deno.test("websocket: upgrade({ protocol }) stamps Sec-WebSocket-Protocol", async () => {
+  const router = new Router();
+  router.add("GET", "/ws", (request) => {
+    const upgrade = request.upgrade({ protocol: "chat" });
+    upgrade.socket.then((ws) => {
+      ws.onmessage = (ev) => ws.send(ev.data);
+    });
+    return upgrade.response;
+  });
+  const { server, port } = serve(router);
+  try {
+    const client = await wsHandshake(port, "/ws", {
+      "Sec-WebSocket-Protocol": "chat",
+    });
+    assertEquals(client.statusLine, "HTTP/1.1 101 Switching Protocols");
+    assertEquals(client.headers.get("sec-websocket-protocol"), "chat");
+    assertEquals(await client.echo("ping"), "ping");
     client.close();
   } finally {
     await server.shutdown();
@@ -193,7 +226,7 @@ Deno.test("websocket: request.upgrade() — 101 with stamped header over the wir
 
 Deno.test("websocket: invalid upgrade request — TypeError at call time with the host's message shape", async () => {
   const router = new Router();
-  router.add("GET", "/ws", (request) => request.upgrade() && "nope");
+  router.add("GET", "/ws", (request) => request.upgrade({}) && "nope");
   const { errors } = await captureLogs(() =>
     (async () => {
       const response = await router.handle(DISPATCH("/ws"));
@@ -210,7 +243,7 @@ Deno.test("websocket: invalid upgrade request — TypeError at call time with th
 
 Deno.test("websocket: missing connection header — host's message shape", async () => {
   const router = new Router();
-  router.add("GET", "/ws", (request) => request.upgrade() && "nope");
+  router.add("GET", "/ws", (request) => request.upgrade({}) && "nope");
   const { errors } = await captureLogs(() =>
     (async () => {
       const response = await router.handle(
@@ -229,7 +262,7 @@ Deno.test("websocket: missing connection header — host's message shape", async
 
 Deno.test("websocket: missing sec-websocket-key — host's message shape", async () => {
   const router = new Router();
-  router.add("GET", "/ws", (request) => request.upgrade() && "nope");
+  router.add("GET", "/ws", (request) => request.upgrade({}) && "nope");
   const { errors } = await captureLogs(() =>
     (async () => {
       const response = await router.handle(
@@ -249,8 +282,8 @@ Deno.test("websocket: missing sec-websocket-key — host's message shape", async
 Deno.test("websocket: second upgrade() call errors", async () => {
   const router = new Router();
   router.add("GET", "/ws", (request) => {
-    request.upgrade();
-    request.upgrade();
+    request.upgrade({});
+    request.upgrade({});
     return "nope";
   });
   const { errors } = await captureLogs(() =>
@@ -269,7 +302,7 @@ Deno.test("websocket: flag set but a different value returned — loud contract 
   const router = new Router();
   let socketRejected = false;
   router.add("GET", "/ws", (request) => {
-    const upgrade = request.upgrade();
+    const upgrade = request.upgrade({});
     upgrade.socket.catch(() => socketRejected = true);
     return "not the placeholder";
   });
@@ -295,7 +328,7 @@ Deno.test("websocket: placeholder replaced by a post-fn — upgrade cancelled (1
   const router = new Router();
   let socketRejected = false;
   router.add("GET", "/ws", (request) => {
-    const upgrade = request.upgrade();
+    const upgrade = request.upgrade({});
     upgrade.socket.catch(() => socketRejected = true);
     return upgrade.response;
   });
